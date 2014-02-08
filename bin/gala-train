@@ -164,7 +164,8 @@ if __name__ == '__main__':
 
     p = imio.read_image_stack(args.fin[0],
             group='/volume/predictions')
-    p = p.transpose((2,1,0,3))
+    if np.ndim(p) < 4: p = p[..., np.newaxis]
+    # p = p.transpose((2,1,0,3))
     p0 = p if args.no_channel_data else p[..., 0]
     if args.single_channel: p = p0
     gs = evaluate.relabel_from_one(imio.read_image_stack(args.fin[1]))[0]

@@ -370,6 +370,8 @@ class Rag(Graph):
             self.ucm = -inf*ones(self.watershed.shape, dtype=float)
             self.ucm[self.watershed==0] = inf
             self.ucm_r = self.ucm.ravel()
+
+        sys.stderr.write("watershed: %s, probabilities: %s" % (watershed.shape, probabilities.shape))
         self.merge_priority_function = merge_priority_function
         self.max_merge_score = -inf
         self.build_graph_from_watershed(allow_shared_boundaries,
