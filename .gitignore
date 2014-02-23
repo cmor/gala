@@ -3,5 +3,6 @@ tmp/
 data/
 cluster
 *.pyc
+*.pyo
 .*.swp
 ipython_log.py*

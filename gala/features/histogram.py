@@ -78,7 +78,7 @@ class Manager(base.Null):
             slope = (bin_edges[b2]-bin_edges[b1]) / (hcum[b2]-hcum[b1])
             delta = p - hcum[b1]
             estim = bin_edges[b1] + delta*slope
-            error = slope==np.inf
+            error = (slope==np.inf or -slope==np.inf)
             estim[error] = (bin_edges[b2]+bin_edges[b1])[error]/2
             ps[i] = estim
         return ps.T

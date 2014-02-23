@@ -262,6 +262,7 @@ if __name__ == '__main__':
                                                 g.number_of_nodes())
         ws = g.get_segmentation()
     sps = imio.raveler_serial_section_map(ws, 0, False, False)
+    args.thresholds = sum([x.split() for x in args.thresholds], [])
     for t in map(float, args.thresholds):
         MasterLogger.info("Agglomerating RAG to %f with %i nodes" % 
                                                 (t, g.number_of_nodes()))
