@@ -32,97 +32,7 @@ except ImportError:
 from gala import imio, agglo, morpho, classify, features, evaluate
 
 
-if __name__ == '__main__':
-
-
-    parser = argparse.ArgumentParser(
-        description='Train a classifier for agglomerative segmentation.')
-    parser.add_argument('fin', nargs=2,
-        help='The boundary probability map and gold standard segmentation ' +\
-        'files. Supported formats are png/tiff/jpeg stacks, .h5 files ' +\
-        'group "stack" is assumed), _boundpred.h5 Ilastik batch prediction '+\
-        'files (group "/volume/prediction" is assumed), and Raveler export '+\
-        'directories.')
-    parser.add_argument('-s', '--single-channel', action='store_true',
-        default=False,
-        help='Use only one channel from the boundary prediction map.')
-    parser.add_argument('-C', '--no-channel-data', action='store_true',
-        default=False,
-        help='The probability map has no separate dimension for channels.')
-    parser.add_argument('-I', '--remove-inclusions', action='store_true',
-        default=False, 
-        help='Remove inclusions before training and before output.')
-    parser.add_argument('--use-neuroproof', action='store_true',
-        default=False, 
-        help='Use NeuroProof.')
-    parser.add_argument('-L', '--learning-mode', metavar='MODE', 
-        default='strict',
-        help='Set the learning mode (strict or loose).')
-    parser.add_argument('-l', '--labeling-mode', metavar='MODE', 
-        default='assignment',
-        help='Set the labeling mode (assignment, voi-sign, or rand-sign).')
-    parser.add_argument('-p', '--priority-mode', default='active',
-        metavar='MODE',
-        help='Set the priority mode during learning (default: %(default)s).')
-    parser.add_argument('-m', '--no-memory', action='store_false', default=True,
-        help='Don\'t remember all training epochs.', dest="memory")
-    parser.add_argument('-u', '--no-unique', action='store_false', default=True,
-        help='Allow use of repeated training examples.', dest="unique")
-    parser.add_argument('-f', '--no-learn-flat', action='store_false',
-        default=True,
-        help='Don\'t perform a flat region adjacency graph learning to begin.',
-        dest="learn_flat" )
-    parser.add_argument('-e', '--num-epochs', type=int, metavar='UINT',
-        default=5, help='Set the min number of epochs of training to run ' +\
-        '(default: %(default)s).')
-    parser.add_argument('-E', '--max-num-epochs', type=int, metavar='UINT',
-        default=20, help='Set the maximum number of epochs of training to ' +\
-        'run (default: %(default)s).')
-    parser.add_argument('-n', '--min-num-examples', type=int, metavar='UINT',
-        default=1, help='Set the minimum number of training examples.')
-    parser.add_argument('-N', '--num-examples', type=int, metavar='UINT',
-        default=None, help='Set the sampled number of training examples.')
-    parser.add_argument('-V', '--active-vi', action='store_true',
-        help='Use expected VI change for active learning.')
-    parser.add_argument('-B', '--active-vi-beta', type=float, default=1.0,
-        help='Relative penalty for false merges in weighted expected VI.')
-    parser.add_argument('-F', '--feature-manager', metavar='EVAL_STR',
-        default='features.base.Composite(children=' +\
-            '[features.moments.Manager(), ' +\
-            'features.histogram.Manager(25, 0, 1, [0.1, 0.5, 0.9])]' +\
-            ')',
-        help='Specify the feature manager you would like to use.')
-    parser.add_argument('-t', '--training-data-extension', metavar='EXT',
-        default='.trdat.h5',
-        help='The filename extension for the training data.')
-    parser.add_argument('-c', '--classifier-extension', metavar='EXT',
-        default=None,
-        help='The filename extension for the saved classifier.')
-    parser.add_argument('-P', '--show-progress', action='store_true', 
-        default=False, help='Show a progress bar.')
-    parser.add_argument('-v', '--verbose', action='store_true', default=False,
-        help='Print runtime information about execution.')
-    parser.add_argument('-Z', '--nozeros', action='store_false', 
-        default=True, help='Disable nozeros mode.')
-    parser.add_argument('-w', '--watershed-file', type=str,
-        help='Use a pre-computed watershed segmentation.')
-    parser.add_argument('-S', '--synapse-file', type=str, metavar='FN',
-        help='Use a synapse annotation json file to help segmentation.')
-    parser.add_argument('-d', '--synapse-dilation', type=int, metavar='INT',
-        help='Dilate synapse points by this amount.', default=1)
-    parser.add_argument('-o', '--output-dir', type=str, default='./',
-        metavar='DIR', help='Directory for all output')
-    parser.add_argument('-x', '--experiment-name', type=str,
-        metavar='EXPT_NAME',
-        help='Name of the experiment -- will be used as the base name for ' +\
-            'all outputs', required=True)
-    parser.add_argument('--seed-cc-threshold', type=int, default=0,
-        help='Connected component threshold in seed creation')
-    parser.add_argument('--no-mito-merge', type=float, nargs='+', default=None,
-        help='Mitochodria channels, Mitochondria threshold, Boundary Threshold \
-        for training without merging the mitochondrial superpixels.')    
-    args = parser.parse_args()
-
+def main(args):
     MasterLogger = logging.getLogger('pipeline')
     MasterLogger.propagate = False
     MasterLogger.setLevel(logging.DEBUG)
@@ -274,3 +184,104 @@ if __name__ == '__main__':
     classifier_ext = args.classifier_extension if args.classifier_extension is not None \
         else classify.default_classifier_extension(rf)
     classify.save_classifier(rf, experiment_prefix + classifier_ext)
+
+if __name__ == '__main__':
+
+
+    parser = argparse.ArgumentParser(
+        description='Train a classifier for agglomerative segmentation.')
+    parser.add_argument('fin', nargs=2,
+        help='The boundary probability map and gold standard segmentation ' +\
+        'files. Supported formats are png/tiff/jpeg stacks, .h5 files ' +\
+        'group "stack" is assumed), _boundpred.h5 Ilastik batch prediction '+\
+        'files (group "/volume/prediction" is assumed), and Raveler export '+\
+        'directories.')
+    parser.add_argument('-s', '--single-channel', action='store_true',
+        default=False,
+        help='Use only one channel from the boundary prediction map.')
+    parser.add_argument('-C', '--no-channel-data', action='store_true',
+        default=False,
+        help='The probability map has no separate dimension for channels.')
+    parser.add_argument('-I', '--remove-inclusions', action='store_true',
+        default=False, 
+        help='Remove inclusions before training and before output.')
+    parser.add_argument('--use-neuroproof', action='store_true',
+        default=False, 
+        help='Use NeuroProof.')
+    parser.add_argument('--profile', action='store_true',
+        default=False,
+        help='Profile the execution of this script.')
+    parser.add_argument('-L', '--learning-mode', metavar='MODE', 
+        default='strict',
+        help='Set the learning mode (strict or loose).')
+    parser.add_argument('-l', '--labeling-mode', metavar='MODE', 
+        default='assignment',
+        help='Set the labeling mode (assignment, voi-sign, or rand-sign).')
+    parser.add_argument('-p', '--priority-mode', default='active',
+        metavar='MODE',
+        help='Set the priority mode during learning (default: %(default)s).')
+    parser.add_argument('-m', '--no-memory', action='store_false', default=True,
+        help='Don\'t remember all training epochs.', dest="memory")
+    parser.add_argument('-u', '--no-unique', action='store_false', default=True,
+        help='Allow use of repeated training examples.', dest="unique")
+    parser.add_argument('-f', '--no-learn-flat', action='store_false',
+        default=True,
+        help='Don\'t perform a flat region adjacency graph learning to begin.',
+        dest="learn_flat" )
+    parser.add_argument('-e', '--num-epochs', type=int, metavar='UINT',
+        default=5, help='Set the min number of epochs of training to run ' +\
+        '(default: %(default)s).')
+    parser.add_argument('-E', '--max-num-epochs', type=int, metavar='UINT',
+        default=20, help='Set the maximum number of epochs of training to ' +\
+        'run (default: %(default)s).')
+    parser.add_argument('-n', '--min-num-examples', type=int, metavar='UINT',
+        default=1, help='Set the minimum number of training examples.')
+    parser.add_argument('-N', '--num-examples', type=int, metavar='UINT',
+        default=None, help='Set the sampled number of training examples.')
+    parser.add_argument('-V', '--active-vi', action='store_true',
+        help='Use expected VI change for active learning.')
+    parser.add_argument('-B', '--active-vi-beta', type=float, default=1.0,
+        help='Relative penalty for false merges in weighted expected VI.')
+    parser.add_argument('-F', '--feature-manager', metavar='EVAL_STR',
+        default='features.base.Composite(children=' +\
+            '[features.moments.Manager(), ' +\
+            'features.histogram.Manager(25, 0, 1, [0.1, 0.5, 0.9])]' +\
+            ')',
+        help='Specify the feature manager you would like to use.')
+    parser.add_argument('-t', '--training-data-extension', metavar='EXT',
+        default='.trdat.h5',
+        help='The filename extension for the training data.')
+    parser.add_argument('-c', '--classifier-extension', metavar='EXT',
+        default=None,
+        help='The filename extension for the saved classifier.')
+    parser.add_argument('-P', '--show-progress', action='store_true', 
+        default=False, help='Show a progress bar.')
+    parser.add_argument('-v', '--verbose', action='store_true', default=False,
+        help='Print runtime information about execution.')
+    parser.add_argument('-Z', '--nozeros', action='store_false', 
+        default=True, help='Disable nozeros mode.')
+    parser.add_argument('-w', '--watershed-file', type=str,
+        help='Use a pre-computed watershed segmentation.')
+    parser.add_argument('-S', '--synapse-file', type=str, metavar='FN',
+        help='Use a synapse annotation json file to help segmentation.')
+    parser.add_argument('-d', '--synapse-dilation', type=int, metavar='INT',
+        help='Dilate synapse points by this amount.', default=1)
+    parser.add_argument('-o', '--output-dir', type=str, default='./',
+        metavar='DIR', help='Directory for all output')
+    parser.add_argument('-x', '--experiment-name', type=str,
+        metavar='EXPT_NAME',
+        help='Name of the experiment -- will be used as the base name for ' +\
+            'all outputs', required=True)
+    parser.add_argument('--seed-cc-threshold', type=int, default=0,
+        help='Connected component threshold in seed creation')
+    parser.add_argument('--no-mito-merge', type=float, nargs='+', default=None,
+        help='Mitochodria channels, Mitochondria threshold, Boundary Threshold \
+        for training without merging the mitochondrial superpixels.')    
+    args = parser.parse_args()
+    if args.profile:
+        import cProfile
+        output_file = os.path.join(args.output_dir, args.experiment_name+"_profile.log")
+        cProfile.run("main(args)", output_file)
+    else:
+        main(args)
+
