@@ -176,7 +176,8 @@ if __name__ == '__main__':
     # load all the required data
     
     # probability map
-    p = imio.read_image_stack(args.fin, single_channel=False)
+    p = imio.read_image_stack(args.fin, single_channel=False, 
+                                group='volume/predictions')
     p0 = p if args.no_channel_data else p[..., 0]
     if args.single_channel: p = p0
     # grayscale image
