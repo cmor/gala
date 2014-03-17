@@ -140,13 +140,17 @@ def main(args):
                                             beta=args.active_vi_beta)
     else:
         active_function = agglo.classifier_probability
+    import time
 
+    start = time.clock()
     d, epochs = g.learn_agglomerate(gs, fm, args.min_num_examples, 
         learn_flat=args.learn_flat, learning_mode=args.learning_mode,
         labeling_mode=args.labeling_mode, priority_mode=args.priority_mode,
         memory=args.memory, unique=args.unique, min_num_epochs=args.num_epochs,
         max_num_epochs=args.max_num_epochs,
         max_num_samples=args.num_examples, active_function=active_function)
+    end = time.clock()
+    MasterLogger.info("Wall clock time to learn_agglomerate(): %d" % (end-start))
     git_stamp = 'git commit unknown'
     """
     current_directory = os.path.realpath('.')
@@ -172,9 +176,13 @@ def main(args):
             experiment_prefix + args.training_data_extension + '.' + str(i),
             info=info_string)
     MasterLogger.info("Training classifier")
+    start = time.clock()
     feat, lab = classify.sample_training_data(
                                     d[0], d[1][:, 0], args.num_examples)
     rf = classify.get_classifier().fit(feat, lab)
+    end = time.clock()
+    MasterLogger.info("Wall clock time to fit_classifier(): %d" % (end-start))
+
     MasterLogger.info("Saving classifier to disk")
     
     # grab features json
