@@ -95,6 +95,40 @@ def test_2channel_composite_feature():
     f = f4
     run_matched(f, 'toy-data/test-04-composite-2channel-12-13.pck', 2)
 
+def test_central_moments():
+    a = np.array([[1,2,3,4,5]]).T
+    b = np.array([[10,20,30,40,50],
+                  [500, 10, 2, -5, 12]]).T
+    c = np.array([[10,20,30,40,50, -5],
+                  [500, 10, 2, -5, 12, 70],
+                  [70, 0.12, 14, -5, 12,0]]).T
+    d = np.array([[  1.95600000e+03,   1.95600000e+03],
+                 [  1.55505882e+03,   1.01972053e+02],
+                 [  1.32785123e+03,  1.14825759e+01],
+                 [  1.18178212e+03,  1.70749482e+00],
+                 [  1.07847585e+03,  2.99198871e-01]])
+    e = np.array([[  6.60000000e+01,  6.60000000e+01],
+                [  2.07960784e+01,  3.12759092e+00],
+                [  6.66117647e+00,  2.10134564e-01],
+                [  2.16794186e+00,  1.82360668e-02],
+                [  7.16501937e-01,  1.86370658e-03]])
+    pymo = features.moments.central_moments_from_noncentral_sums_py
+    cymo = features.moments.central_moments_from_noncentral_sums
+    for example in [a,b,c,d,e]:
+        assert_equal_lists_or_arrays(pymo(example), cymo(example))
+
+def test_histogram_percentiles():
+    desired_percentiles = np.array([0.1, 0.5, 0.9])
+    manager = features.histogram.Manager(25, 0, 1, desired_percentiles)
+    h1 = np.array([[ 0.,0.,0.,0.,0.,0., 0.,0.,0.00205339,  0.01026694,  0.04106776,  0.04722793,  0.04312115,
+                       0.04928131,  0.02669405,  0.0513347,   0.03696099,  0.02874743,  0.0349076,
+                       0.03901437,  0.06570842,  0.09650924,  0.137577,    0.20533881,  0.08418891],
+                     [ 0.52977413,  0.25462012,  0.14784394,  0.06365503,  0.00410678,  0., 0., 0., 0.,
+                       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]])
+    for h in [h1]:
+        cyh = manager.percentiles(h, desired_percentiles)
+        pyh = manager.percentiles_py(h, desired_percentiles)
+        assert_equal_lists_or_arrays(pyh, cyh)
 
 if __name__ == '__main__':
     from numpy import testing
