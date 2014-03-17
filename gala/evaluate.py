@@ -322,6 +322,7 @@ def relabel_from_one(label_field):
     >>> (inv[relab] == label_field).all()
     True
     """
+    label_field = label_field.astype(np.int)
     labels = np.unique(label_field)
     labels0 = labels[labels != 0]
     m = labels.max()
