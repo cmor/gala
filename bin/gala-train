@@ -22,6 +22,7 @@ try:
 except ImportError:
     logging.warning('Could not import skimage.')
 from scipy.ndimage import label
+from scipy.misc import imsave
 
 try:
     import syngeo
@@ -124,6 +125,19 @@ def main(args):
         threshold=args.no_mito_merge[-2])
         is_mito_boundary =  functools.partial(agglo.is_mito_boundary,\
         channel=args.no_mito_merge[0:-2], threshold=args.no_mito_merge[-1])
+
+
+    for im,label in [(p, "probability_map"), (ws,"watershed"),(gs,"groundtruth")]:
+        if im.ndim > 3:
+            for jj in range(im.shape[3]):
+                path = experiment_prefix+"-"+label+str(jj)+".png"
+                MasterLogger.info("Writing "+path)
+                imsave(path, im[0,:,:,jj])
+        else:
+            path = experiment_prefix+"-"+label+".png"
+            MasterLogger.info("Writing "+path)
+            imsave(path, im[0,:,:])
+
 
     MasterLogger.info("Building RAG")
     g = agglo.Rag(ws, p, feature_manager=fm, show_progress=args.show_progress,
