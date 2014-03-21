@@ -322,7 +322,8 @@ def relabel_from_one(label_field):
     >>> (inv[relab] == label_field).all()
     True
     """
-    label_field = label_field.astype(np.int)
+    if not issubclass(label_field.dtype.type, np.integer):
+        raise TypeError("Classes to relabel must be integers!")
     labels = np.unique(label_field)
     labels0 = labels[labels != 0]
     m = labels.max()
