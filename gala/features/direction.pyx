@@ -2,19 +2,24 @@ import numpy as np
 cimport numpy as np
 from . import base
 
+NULL_VALUE = -1
+
 class Manager(base.Null):
     def __init__(self, z_resolution_factor, box_radius=110, 
-                subsample_target=500, min_sample_stride=10, *args, **kwargs):
+                subsample_target=500, min_z_extent=10, min_sample_stride=10,
+                *args, **kwargs):
         super(Manager, self).__init__()
         self.z_resolution_factor = z_resolution_factor
         self.box_radius = box_radius
         self.subsample_target = subsample_target
+        self.min_z_extent = min_z_extent
         self.min_sample_stride = min_sample_stride
 
     @classmethod
     def load_dict(cls, fm_info):
         obj = cls(fm_info['z_resolution_factor'], fm_info['box_radius'],
-                fm_info['subsample_target'], fm_info['min_sample_stride'])
+                fm_info['subsample_target'], fm_info['min_z_extent'],
+                fm_info['min_sample_stride'])
         return obj
 
     def write_fm(self, json_fm={}):
@@ -25,18 +30,10 @@ class Manager(base.Null):
             'z_resolution_factor' : self.z_resolution_factor,
             'box_radius' : self.box_radius,
             'subsample_target' : self.subsample_target,
+            'min_z_extent' : self.min_z_extent,
             'min_sample_stride' : self.min_sample_stride
         }
         return json_fm
-
-    def compute_edge_features(self, g, n1, n2, cache=None):
-        if cache == None: cache = g[n1][n2][self.default_cache]
-        return cache
-
-    def update_edge_cache(self, g, e1, e2, dst, src):
-        c = self.create_edge_cache(g, *e1)
-        for i, e in enumerate(c):
-            dst[i] = e
 
     def points_from_idxs(self, idxs, cube_shape):
         if len(cube_shape) == 3:
@@ -47,20 +44,30 @@ class Manager(base.Null):
         return np.concatenate((unsquished_zs[:,np.newaxis],
                 ys[:,np.newaxis],xs[:,np.newaxis]), axis=1).astype(np.integer)
 
-    def create_edge_cache(self, g, n1, n2):
+    def compute_edge_features(self, g, n1, n2, cache=None):
+        if cache == None: cache = g[n1][n2][self.default_cache]
         cube_shape = g.probabilities.shape
         edge_points = self.points_from_idxs(list(g[n1][n2]['boundary']), cube_shape)
         edge_mean = np.mean(edge_points, axis=0).astype(np.integer)
-        vectors = compute_pc_vectors(self.points_from_idxs(list(g.node[n1]['extent']), cube_shape),
-                        self.points_from_idxs(list(g.node[n2]['extent']), cube_shape), 
+        all_n1_points = self.points_from_idxs(list(g.node[n1]['extent']), cube_shape)
+        all_n2_points = self.points_from_idxs(list(g.node[n2]['extent']), cube_shape)
+        z_max = cube_shape[0] * self.z_resolution_factor 
+        if _dim_extent(all_n1_points, 0, z_max) < self.min_z_extent or \
+           _dim_extent(all_n2_points, 0, z_max) < self.min_z_extent:
+            return compute_feature_vector(np.ones((3,3)) * NULL_VALUE)
+
+        vectors = compute_pc_vectors(all_n1_points, all_n2_points, 
                         edge_mean, self.box_radius, self.subsample_target,
                         self.min_sample_stride)
         return compute_feature_vector(vectors)
 
 
 def compute_feature_vector(pc_vectors):
+    feature_vector = np.ones(5, dtype=np.double)
+    if (pc_vectors == NULL_VALUE).all():
+        return feature_vector * NULL_VALUE
+
     # we assume that pc_vectors is normalized
-    feature_vector = np.zeros(5, dtype=np.double)
     between_segments = np.dot(pc_vectors[0,:],pc_vectors[1,:])
     between_pc_and_centers_1 = np.dot(pc_vectors[0,:],pc_vectors[2,:])
     between_pc_and_centers_2 = np.dot(pc_vectors[1,:],pc_vectors[2,:])
@@ -78,12 +85,16 @@ def compute_pc_vectors(all_n1_points, all_n2_points, center, radius,
                     max_points, min_sample_stride)
     n2_points = _limit_to_radius(all_n2_points, center, radius,
                     max_points, min_sample_stride)
+   
+    # catch having no points in extent 
+    if n1_points.shape[0] == 0 or n2_points.shape[0] == 0:
+        return np.ones((3,3)) * NULL_VALUE
+
     n1_mean = np.mean(n1_points, axis=0)
     n2_mean = np.mean(n2_points, axis=0)
     n1_meanless = n1_points - n1_mean 
     n2_meanless = n2_points - n2_mean
     between_means = n1_mean - n2_mean
-
     try:
         u1,d1,v1 = np.linalg.svd(n1_meanless)
         u2,d2,v2 = np.linalg.svd(n2_meanless)
@@ -95,7 +106,7 @@ def compute_pc_vectors(all_n1_points, all_n2_points, center, radius,
         print "all_n1_points:",all_n1_points
         print "n1_points.shape:",n1_points.shape
         print "n2_points.",n2_points.shape
-        return np.zeros((3,3))
+        return np.ones((3,3)) * NULL_VALUE
 
     return np.concatenate((_norm(v1[0])[np.newaxis,:], _norm(v2[0])[np.newaxis,:], 
             _norm(between_means)[np.newaxis,:]), axis=0)
@@ -112,6 +123,18 @@ cdef _norm(double[:] vector):
         normed[ii] = vector[ii] / length
     return normed
 
+def dim_extent(points, dim, upper_bound):
+    return _dim_extent(points, dim, upper_bound)
+
+cdef _dim_extent(long[:,:] points, int dim, int upper_bound):
+    cdef int pp, extent
+    cdef np.ndarray[np.int_t, ndim=1] seen = np.zeros(upper_bound, dtype=np.integer)
+    extent = 0
+    for pp in range(points.shape[0]):
+        seen[points[pp, dim]] = 1
+    for pp in range(seen.shape[0]):
+        extent += seen[pp]
+    return extent
 
 def limit_to_radius(points, center, radius, max_count, stride):
     return _limit_to_radius(points, center, radius, max_count, stride)
