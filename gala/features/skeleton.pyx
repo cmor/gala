@@ -1,12 +1,17 @@
 import numpy as np
 cimport numpy as np
 from . import base
+cdef extern from "math.h":
+    double sqrt(double x)
+
+NULL_VALUE = -1
 
 class Manager(base.Null):
-    def __init__(self, z_resolution_factor, *args, **kwargs):
+    def __init__(self, z_resolution_factor, no_coplanar=False, *args, **kwargs):
         super(Manager, self).__init__()
         self.z_resolution_factor = z_resolution_factor
-        self.null_feature_vector = np.ones(8) * -1
+        self.no_coplanar = no_coplanar
+        self.null_feature_vector = np.ones(8) * NULL_VALUE
 
     @classmethod
     def load_dict(cls, fm_info):
@@ -36,18 +41,21 @@ class Manager(base.Null):
         return np.concatenate((unsquished_zs[:,np.newaxis],
                 ys[:,np.newaxis],xs[:,np.newaxis]), axis=1).astype(np.integer)
 
-    def compute_difference_features(self, g, n1, n2, n1_centroids=None, n2_centroids=None):
-        if n1_centroids is None: n1_centroids = g.node[n1][self.default_cache]
-        if n2_centroids is None: n2_centroids = g.node[n2][self.default_cache]
-        if len(n1_centroids) < 2 or len(n2_centroids) < 2:
+    def compute_difference_features(self, g, n1, n2, n1_centroids_l=None, n2_centroids_l=None):
+        if n1_centroids_l is None: n1_centroids_l = g.node[n1][self.default_cache]
+        if n2_centroids_l is None: n2_centroids_l = g.node[n2][self.default_cache]
+        if len(n1_centroids_l) < 2 or len(n2_centroids_l) < 2:
             return self.null_feature_vector
-        n1_closest_centroid, n2_closest_centroid = closest_pair(n1_centroids,
-                                                                 n2_centroids)
-        if len(n1_closest_centroid) < 1 or len(n2_closest_centroid) < 1:
+        n1_centroids, n2_centroids = np.vstack(n1_centroids_l), np.vstack(n2_centroids_l)
+        n1_closest_centroid, n2_closest_centroid = _closest_pair(n1_centroids,
+                                                         n2_centroids, self.no_coplanar)
+        if (n1_closest_centroid==NULL_VALUE).all() or (
+            n2_closest_centroid==NULL_VALUE).all():
             return self.null_feature_vector
-        n1_next_closest = closest_point(n1_closest_centroid, n1_centroids)
-        n2_next_closest = closest_point(n2_closest_centroid, n2_centroids)
-        if len(n1_next_closest) < 1 or len(n2_next_closest) < 1:
+        n1_next_closest = _closest_point(n1_closest_centroid, n1_centroids, self.no_coplanar, n2_closest_centroid[0])
+        n2_next_closest = _closest_point(n2_closest_centroid, n2_centroids, self.no_coplanar, n1_closest_centroid[0])
+        if (n1_next_closest==NULL_VALUE).all() or (
+            n2_next_closest==NULL_VALUE).all():
             return self.null_feature_vector
         return compute_feature_vector(n1_closest_centroid, n2_closest_centroid,
                                     n1_next_closest, n2_next_closest)
@@ -96,41 +104,49 @@ def compute_feature_vector(p1, p2, s1, s2):
     feature_vector[5] = (p1[0] == s2[0])
     feature_vector[6] = (p2[0] == s1[0])
     feature_vector[7] = (p2[0] == s2[0])
+    # print "p1:",p1,"p2:",p2,"s1:",s1,"s2:",s2
+    # print "fvec:",feature_vector
     return feature_vector
 
-def closest_pair(set1, set2, no_coplanar=False):
-    """ set1 and set2 are lists of ndarrays """
-    champ_distance = np.inf
-    champ_s1, champ_s2 = (), ()
-    for p1 in set1:
-        for p2 in set2:
-            if p1[0] == p2[0] and no_coplanar: continue
-            distance = euclidean_distance(p1, p2)
+cdef _closest_pair(double[:,:] set1, double[:,:] set2, no_coplanar=False):
+    cdef double distance
+    cdef double champ_distance = np.inf
+    cdef np.ndarray[np.double_t, ndim=1] champ_s1 = np.ones(set1.shape[1], dtype=np.double)*NULL_VALUE
+    cdef np.ndarray[np.double_t, ndim=1] champ_s2 = np.ones(set2.shape[1], dtype=np.double)*NULL_VALUE
+    for p1 in range(set1.shape[0]):
+        for p2 in range(set2.shape[0]):
+            if set1[p1,0] == set2[p2,0] and no_coplanar: continue
+            distance = _euclidean_distance_sq(set1[p1,0], set1[p1,1], set1[p1,2],
+                                              set2[p2,0], set2[p2,1], set2[p2,2])
             if distance > 0 and distance < champ_distance:
                 champ_distance = distance
-                champ_s1, champ_s2 = p1, p2
+                for ii in range(set1.shape[1]): champ_s1[ii] = set1[p1,ii]
+                for ii in range(set2.shape[1]): champ_s2[ii] = set2[p2,ii]
     return champ_s1, champ_s2
 
-def closest_point(p1, set2, no_coplanar=False):
-    champ_distance = np.inf
-    champ_s2 = ()
-    for p2 in set2:
-        if p1[0] == p2[0] and no_coplanar: continue
-        distance = euclidean_distance(p1, p2)
+cdef _closest_point(double[:] v1, double[:,:] set2, no_coplanar=False, forbidden_plane=-1):
+    cdef int p2,ii
+    cdef double distance
+    cdef double champ_distance = np.inf
+    cdef np.ndarray[np.double_t, ndim=1] champ_s2 = np.ones(set2.shape[1], dtype=np.double)*NULL_VALUE
+    for p2 in range(set2.shape[0]):
+        if no_coplanar:
+            if v1[0] == set2[p2,0] or set2[p2,0] == forbidden_plane: continue
+        distance = _euclidean_distance_sq(v1[0], v1[1], v1[2],
+                                          set2[p2,0], set2[p2,1], set2[p2,2])
         if distance > 0 and distance < champ_distance:
             champ_distance = distance
-            champ_s2 = p2
+            for ii in range(set2.shape[1]): champ_s2[ii] = set2[p2,ii]
     return champ_s2
 
-def euclidean_distance(p1, p2):
-    v1, v2 = np.array(p1), np.array(p2)
-    return np.sqrt(np.sum((v1-v2)**2))
+cdef inline _euclidean_distance_sq(double z1, double y1, double x1, double z2, double y2, double x2):
+    return (z1-z2)*(z1-z2) + (y1-y2)*(y1-y2) + (x1-x2)*(x1-x2)
 
 cdef _norm(double[:] vector):
     cdef double total = 0
     for ii in range(vector.shape[0]):
         total += vector[ii] * vector[ii]
-    cdef double length = np.sqrt(total)
+    cdef double length = sqrt(total)
     cdef np.ndarray[np.double_t, ndim=1] normed = np.zeros(vector.shape[0], dtype=np.double)
     if total == 0: return normed
     for ii in range(vector.shape[0]):
