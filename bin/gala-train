@@ -185,10 +185,10 @@ def main(args):
     MasterLogger.info("Saving training data to disk")
     classify.save_training_data_to_disk(d, 
         experiment_prefix + args.training_data_extension, info=info_string)
-    for i, epoch in enumerate(epochs):
-        classify.save_training_data_to_disk(epoch, 
-            experiment_prefix + args.training_data_extension + '.' + str(i),
-            info=info_string)
+    #for i, epoch in enumerate(epochs):
+    #    classify.save_training_data_to_disk(epoch, 
+    #        experiment_prefix + args.training_data_extension + '.' + str(i),
+    #        info=info_string)
     MasterLogger.info("Training classifier")
     start = time.clock()
     feat, lab = classify.sample_training_data(
