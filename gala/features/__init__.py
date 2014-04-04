@@ -17,7 +17,8 @@ from . import \
     moments, \
     orientation, \
     skeleton, \
-    squiggliness
+    squiggliness, \
+    stage
 
 __all__ = ['base', 'contact', 'direction', 'convex_hull', 'graph', 'histogram', 'inclusion', 'io',
-    'moments', 'orientation', 'squiggliness', 'skeleton']
+    'moments', 'orientation', 'squiggliness', 'skeleton', "stage"]
