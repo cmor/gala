@@ -5,13 +5,16 @@ cdef extern from "math.h":
     double sqrt(double x)
 
 NULL_VALUE = -1
+BASE_FEATURE_VECTOR_LEN = 9
 
 class Manager(base.Null):
-    def __init__(self, z_resolution_factor, no_coplanar=False, *args, **kwargs):
+    def __init__(self, z_resolution_factor, neighbors_considered=1, *args, **kwargs):
         super(Manager, self).__init__()
         self.z_resolution_factor = z_resolution_factor
-        self.no_coplanar = no_coplanar
-        self.null_feature_vector = np.ones(8) * NULL_VALUE
+        self.neighbors_considered = neighbors_considered
+        print "--- considering %d neighbors" % (neighbors_considered)
+        self.unit_null_feature_vector = np.ones(BASE_FEATURE_VECTOR_LEN) * NULL_VALUE
+        self.null_feature_vector = np.ones(BASE_FEATURE_VECTOR_LEN*neighbors_considered) * NULL_VALUE
 
     @classmethod
     def load_dict(cls, fm_info):
@@ -23,7 +26,8 @@ class Manager(base.Null):
             json_fm['feature_list'] = []
         json_fm['feature_list'].append('skeleton')
         json_fm['contact'] = {
-            'z_resolution_factor': self.z_resolution_factor
+            'z_resolution_factor': self.z_resolution_factor,
+            'neighbors_considered': self.neighbors_considered
         }
         return json_fm
 
@@ -47,18 +51,26 @@ class Manager(base.Null):
         if len(n1_centroids_l) < 2 or len(n2_centroids_l) < 2:
             return self.null_feature_vector
         n1_centroids, n2_centroids = np.vstack(n1_centroids_l), np.vstack(n2_centroids_l)
-        n1_closest_centroid, n2_closest_centroid = _closest_pair(n1_centroids,
-                                                         n2_centroids, self.no_coplanar)
+        n1_closest_centroid, n2_closest_centroid = _closest_pair(n1_centroids,n2_centroids)
         if (n1_closest_centroid==NULL_VALUE).all() or (
             n2_closest_centroid==NULL_VALUE).all():
             return self.null_feature_vector
-        n1_next_closest = _closest_point(n1_closest_centroid, n1_centroids, self.no_coplanar, n2_closest_centroid[0])
-        n2_next_closest = _closest_point(n2_closest_centroid, n2_centroids, self.no_coplanar, n1_closest_centroid[0])
-        if (n1_next_closest==NULL_VALUE).all() or (
-            n2_next_closest==NULL_VALUE).all():
-            return self.null_feature_vector
-        return compute_feature_vector(n1_closest_centroid, n2_closest_centroid,
-                                    n1_next_closest, n2_next_closest)
+        feature_vector = np.zeros(BASE_FEATURE_VECTOR_LEN * self.neighbors_considered,)
+        points_used = np.ones((2*self.neighbors_considered, n1_centroids.shape[1]))*NULL_VALUE
+        for ii in range(self.neighbors_considered):
+            n1_next_closest = _closest_point(n1_closest_centroid, n1_centroids, points_used)
+            n2_next_closest = _closest_point(n2_closest_centroid, n2_centroids, points_used)
+            for jj in range(points_used.shape[1]):
+                points_used[(ii*2),jj] = n1_next_closest[jj]
+                points_used[(ii*2+1),jj] = n2_next_closest[jj]
+            if (n1_next_closest==NULL_VALUE).all() or (
+                n2_next_closest==NULL_VALUE).all():
+                feature_vector[ii*BASE_FEATURE_VECTOR_LEN:(ii+1)*BASE_FEATURE_VECTOR_LEN] = self.unit_null_feature_vector
+            else:
+                feature_vector[ii * BASE_FEATURE_VECTOR_LEN:(ii+1)*BASE_FEATURE_VECTOR_LEN] = \
+                    compute_feature_vector(n1_closest_centroid, n2_closest_centroid, n1_next_closest, n2_next_closest)
+        #print "fvec:",feature_vector
+        return feature_vector
 
     def update_node_cache(self, g, n1, n2, dst, src):
         dst += src
@@ -94,7 +106,7 @@ def compute_feature_vector(p1, p2, s1, s2):
     p1_to_p2 = _norm((p1-p2))
     p1_to_s1 = _norm((p1-s1))
     p2_to_s2 = _norm((p2-s2))
-    feature_vector = np.zeros(8)
+    feature_vector = np.zeros(BASE_FEATURE_VECTOR_LEN,)
     feature_vector[0] = np.dot(p1_to_p2, p1_to_s1)
     feature_vector[1] = np.dot(p1_to_p2, p2_to_s2)
     feature_vector[2] = feature_vector[0] - feature_vector[1]
@@ -104,18 +116,17 @@ def compute_feature_vector(p1, p2, s1, s2):
     feature_vector[5] = (p1[0] == s2[0])
     feature_vector[6] = (p2[0] == s1[0])
     feature_vector[7] = (p2[0] == s2[0])
-    # print "p1:",p1,"p2:",p2,"s1:",s1,"s2:",s2
-    # print "fvec:",feature_vector
+    feature_vector[8] = (s1[0] == s2[0])
+    #print "p1:",p1,"p2:",p2,"s1:",s1,"s2:",s2
     return feature_vector
 
-cdef _closest_pair(double[:,:] set1, double[:,:] set2, no_coplanar=False):
+cdef _closest_pair(double[:,:] set1, double[:,:] set2):
     cdef double distance
     cdef double champ_distance = np.inf
     cdef np.ndarray[np.double_t, ndim=1] champ_s1 = np.ones(set1.shape[1], dtype=np.double)*NULL_VALUE
     cdef np.ndarray[np.double_t, ndim=1] champ_s2 = np.ones(set2.shape[1], dtype=np.double)*NULL_VALUE
     for p1 in range(set1.shape[0]):
         for p2 in range(set2.shape[0]):
-            if set1[p1,0] == set2[p2,0] and no_coplanar: continue
             distance = _euclidean_distance_sq(set1[p1,0], set1[p1,1], set1[p1,2],
                                               set2[p2,0], set2[p2,1], set2[p2,2])
             if distance > 0 and distance < champ_distance:
@@ -124,14 +135,24 @@ cdef _closest_pair(double[:,:] set1, double[:,:] set2, no_coplanar=False):
                 for ii in range(set2.shape[1]): champ_s2[ii] = set2[p2,ii]
     return champ_s1, champ_s2
 
-cdef _closest_point(double[:] v1, double[:,:] set2, no_coplanar=False, forbidden_plane=-1):
-    cdef int p2,ii
+cdef _closest_point(double[:] v1, double[:,:] set2, double[:,:] forbidden_points):
+    cdef int p2,ii,jj,ff,match,any_match
     cdef double distance
     cdef double champ_distance = np.inf
     cdef np.ndarray[np.double_t, ndim=1] champ_s2 = np.ones(set2.shape[1], dtype=np.double)*NULL_VALUE
     for p2 in range(set2.shape[0]):
-        if no_coplanar:
-            if v1[0] == set2[p2,0] or set2[p2,0] == forbidden_plane: continue
+        any_match = 0
+        # skip if its a forbidden point
+        for ff in range(forbidden_points.shape[0]):
+            match = 1
+            for jj in range(forbidden_points.shape[1]):
+                if (forbidden_points[ff,jj] != set2[p2,jj]):
+                    match = 0
+                    break
+            if (match == 1):
+                any_match = 1
+                break
+        if any_match == 1: continue
         distance = _euclidean_distance_sq(v1[0], v1[1], v1[2],
                                           set2[p2,0], set2[p2,1], set2[p2,2])
         if distance > 0 and distance < champ_distance:
