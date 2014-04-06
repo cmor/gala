@@ -24,8 +24,8 @@ class Manager(base.Null):
         return json_fm
 
     def compute_edge_features(self, g, n1, n2, cache=None):
-        volume_ratio_1 = float(len(g[n1][n2]['boundary'])) / len(g.node[n1]['extent'])
-        volume_ratio_2 = float(len(g[n1][n2]['boundary'])) / len(g.node[n2]['extent'])
+        volume_ratio_1 = float(len(g[n1][n2]['boundary'])) / g.node[n1]['size']
+        volume_ratio_2 = float(len(g[n1][n2]['boundary'])) / g.node[n2]['size']
         if cache == None: cache = g[n1][n2][self.default_cache]
         contact_matrix = _compute_contact_matrix(cache, volume_ratio_1, 
                                                     volume_ratio_2)
@@ -40,8 +40,8 @@ class Manager(base.Null):
 
     def create_edge_cache(self, g, n1, n2):
         edge_idxs = np.array(list(g[n1][n2]['boundary']))
-        n1_idxs = np.array(list(g.node[n1]['extent']))
-        n2_idxs = np.array(list(g.node[n2]['extent']))
+        n1_idxs = np.array(list(g.extent(n1)))
+        n2_idxs = np.array(list(g.extent(n2)))
         if self.oriented: ar = g.oriented_probabilities_r
         else: ar = g.non_oriented_probabilities_r
         return _compute_edge_cache(edge_idxs, n1_idxs, n2_idxs, ar, self.thresholds)
@@ -51,8 +51,8 @@ class Manager(base.Null):
 
     def pixelwise_update_edge_cache(self, g, n1, n2, dst, idxs, remove=False):
         if len(idxs) == 0: return
-        n1_idxs = np.array(list(g.node[n1]['extent']))
-        n2_idxs = np.array(list(g.node[n2]['extent']))
+        n1_idxs = np.array(list(g.extent(n1)))
+        n2_idxs = np.array(list(g.extent(n2)))
         a = -1.0 if remove else 1.0
         if self.oriented: ar = g.oriented_probabilities_r
         else: ar = g.non_oriented_probabilities_r

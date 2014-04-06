@@ -32,7 +32,7 @@ class Manager(base.Null):
         return json_fm
 
     def create_node_cache(self, g, n):
-        points = self.points_from_idxs(list(g.node[n]['extent']), 
+        points = self.points_from_idxs(list(g.extent(n)), 
                                             g.probabilities.shape)
         return compute_flat_centroids(points, 0)
 

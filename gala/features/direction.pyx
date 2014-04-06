@@ -49,8 +49,8 @@ class Manager(base.Null):
         cube_shape = g.probabilities.shape
         edge_points = self.points_from_idxs(list(g[n1][n2]['boundary']), cube_shape)
         edge_mean = np.mean(edge_points, axis=0).astype(np.integer)
-        all_n1_points = self.points_from_idxs(list(g.node[n1]['extent']), cube_shape)
-        all_n2_points = self.points_from_idxs(list(g.node[n2]['extent']), cube_shape)
+        all_n1_points = self.points_from_idxs(list(g.extent(n1)), cube_shape)
+        all_n2_points = self.points_from_idxs(list(g.extent(n2)), cube_shape)
         z_max = cube_shape[0] * self.z_resolution_factor 
         if _dim_extent(all_n1_points, 0, z_max) < self.min_z_extent or \
            _dim_extent(all_n2_points, 0, z_max) < self.min_z_extent:

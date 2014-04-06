@@ -117,8 +117,8 @@ def approximate_boundary_mean(g, n1, n2):
 
 def make_ladder(priority_function, threshold, strictness=1):
     def ladder_function(g, n1, n2):
-        s1 = len(g.node[n1]['extent'])
-        s2 = len(g.node[n2]['extent'])
+        s1 = g.node[n1]['size']
+        s2 = g.node[n2]['size']
         ladder_condition = \
                 (s1 < threshold and not g.at_volume_boundary(n1)) or \
                 (s2 < threshold and not g.at_volume_boundary(n2))
@@ -159,7 +159,7 @@ def mito_merge():
             else:
                 mito = n2
                 cyto = n1
-            if len(g.node[mito]["extent"])>len(g.node[cyto]["extent"]):
+            if len(g.node[mito]["size"])>len(g.node[cyto]["size"]):
                 return np.inf
             else:
                 return 1.0 - (float(len(g[mito][cyto]["boundary"]))/
@@ -198,7 +198,7 @@ def expected_change_vi(feature_extractor, classifier, alpha=1.0, beta=1.0):
         p = prob_func(g, n1, n2) # Prediction from the classifier
         # Calculate change in VI if n1 and n2 should not be merged
         v = compute_local_vi_change(
-            len(g.node[n1]['extent']), len(g.node[n2]['extent']), g.volume_size
+            g.node[n1]['size'], g.node[n2]['size'], g.volume_size
         )
         # Return expected change
         return  (p*alpha*v + (1.0-p)*(-beta*v))
@@ -229,7 +229,7 @@ def expected_change_rand(feature_extractor, classifier, alpha=1.0, beta=1.0):
     def predict(g, n1, n2):
         p = float(prob_func(g, n1, n2)) # Prediction from the classifier
         v = compute_local_rand_change(
-            len(g.node[n1]['extent']), len(g.node[n2]['extent']), g.volume_size
+            g.node[n1]['size'], g.node[n2]['size'], g.volume_size
         )
         return p*v*alpha + (1.0-p)*(-beta*v)
     return predict
@@ -492,6 +492,8 @@ class Rag(Graph):
             for n1, n2 in self.edges():
                 if isfrozenedge(self, n1, n2):
                     self.frozen_edges.add((n1,n2))
+        for nodeid in self.nodes():
+            del self.node[nodeid]["extent"]
 
 
     def __copy__(self):
@@ -505,9 +507,13 @@ class Rag(Graph):
         return g
 
     def extent(self, nodeid):
+        if 'extent' in self.node[nodeid]: return self.node[nodeid]['extent']
         extent_array = _flood_fill_3d(self.watershed, 
                 np.array(self.node[nodeid]['entrypoint']), 
                 np.array(self.node[nodeid]['watershed_ids']))
+        if len(extent_array) != self.node[nodeid]['size']:
+            sys.stderr.write("Flood fill fail - found %d voxels but size expected %d\n" \
+                                % (len(extent_array), self.node[nodeid]['size']))
         raveled_indices = np.ravel_multi_index((extent_array[:,0], 
             extent_array[:,1], extent_array[:,2]), self.watershed.shape)
         return set(raveled_indices)
@@ -969,7 +975,7 @@ class Rag(Graph):
             excl = morpho.pad(excl, [0]*self.pad_thickness)
         for n in self.nodes():
             if excl.size != 0:
-                eids = unique(excl.ravel()[list(self.node[n]['extent'])])
+                eids = unique(excl.ravel()[list(self.extent(n))])
                 eids = eids[flatnonzero(eids)]
                 self.node[n]['exclusions'] = set(list(eids))
             else:
@@ -1391,7 +1397,7 @@ class Rag(Graph):
         n1, n2 = edge
         features = feature_map(self, n1, n2).ravel()
         # Calculate weights for weighting data points
-        s1, s2 = [len(self.node[n]['extent']) for n in [n1, n2]]
+        s1, s2 = [self.node[n]['size'] for n in [n1, n2]]
         weights = \
             compute_local_vi_change(s1, s2, self.volume_size), \
             compute_local_rand_change(s1, s2, self.volume_size)
@@ -1614,15 +1620,9 @@ class Rag(Graph):
             self.node[n1]['exclusions'].update(self.node[n2]['exclusions'])
         self.update_ucm(n1, n2)
         w = self[n1][n2].get('weight', merge_priority)
-        self.node[n1]['extent'].update(self.node[n2]['extent'])
+        # self.node[n1]['extent'].update(self.node[n2]['extent'])
         self.node[n1]['size'] += self.node[n2]['size']
         self.node[n1]['watershed_ids'] += self.node[n2]['watershed_ids']
-
-        flooded = self.extent(n1)
-        if self.node[n1]['extent'] == flooded:
-            sys.stderr.write("!")
-        else:
-            sys.stderr.write("flood-fill-fail: expected %d, got %d\n" % (len(self.node[n1]['extent']), len(flooded)))
 
         self.feature_manager.update_node_cache(self, n1, n2,
                 self.node[n1]['feature-cache'], self.node[n2]['feature-cache'])
@@ -1737,7 +1737,7 @@ class Rag(Graph):
         .. [1] Shi, J., and Malik, J. (2000). Normalized cuts and image
                segmentation. Pattern Analysis and Machine Intelligence.
         """
-        node_extent = list(self.node[u]['extent'])
+        node_extent = list(self.extent(u))
         node_borders = set().union(
                         *[self[u][v]['boundary'] for v in self.neighbors(u)])
         labels = unique(self.watershed_r[node_extent])
@@ -1885,7 +1885,7 @@ class Rag(Graph):
         if nbunch is None:
             nbunch = self.nodes()
         for n in nbunch:
-            vr[list(self.node[n]['extent'])] = n
+            vr[list(self.extent(n))] = n
         return morpho.juicy_center(v,self.pad_thickness)
 
 
@@ -1946,8 +1946,8 @@ class Rag(Graph):
             del bcc[container] # remove the main graph
             bcc = map(list, bcc)
             for cc in bcc:
-                cc.sort(key=lambda x: len(self.node[x]['extent']), reverse=True)
-            bcc.sort(key=lambda x: len(self.node[x[0]]['extent']))
+                cc.sort(key=lambda x: self.node[x]['size'], reverse=True)
+            bcc.sort(key=lambda x: self.node[x[0]]['size'])
             for cc in bcc:
                 self.merge_subgraph(cc, cc[0])
 
@@ -2131,8 +2131,8 @@ class Rag(Graph):
             {'location': map(int, self.get_edge_coordinates(i, j)[-1::-1]),
             'node1': int(i), 'node2': int(j),
             'edge_size': len(self[i][j]['boundary']),
-            'size1': len(self.node[i]['extent']),
-            'size2': len(self.node[j]['extent']),
+            'size1': len(self.node[i]['size']),
+            'size2': len(self.node[j]['size']),
             'weight': float(self[i][j]['weight'])}
             for i, j in self.real_edges()
         ]
@@ -2224,7 +2224,7 @@ def is_mito_boundary(g, n1, n2, channel=2, threshold=0.5):
 
 
 def is_mito(g, n, channel=2, threshold=0.5):
-        return max(np.mean(g.probabilities_r[list(g.node[n]["extent"]), c]) \
+        return max(np.mean(g.probabilities_r[list(g.extent(n)), c]) \
         for c in channel) > threshold
 
 
