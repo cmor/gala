@@ -12,6 +12,7 @@ from numpy import (array, mean, zeros, zeros_like, uint8, where, unique,
     double, newaxis, nonzero, median, exp, log2, float, ones, arange, inf,
     flatnonzero, sign, unravel_index, bincount)
 import numpy as np
+cimport numpy as np
 from scipy.stats import sem
 from scipy.sparse import lil_matrix
 from scipy.misc import comb as nchoosek
@@ -265,6 +266,106 @@ def random_priority(g, n1, n2):
         return inf
     return random.random()
 
+def flood_fill(im, start, acceptable, raveled = False):
+    if im[start] not in acceptable: return []
+    cdef np.ndarray[np.int_t, ndim=2] matches
+    if im.ndim == 3:
+        a = np.array(acceptable)
+        s = np.array(start)
+        matches = _flood_fill_3d(im, s, a)
+        if raveled:
+            formatted = matches.T
+            return np.ravel_multi_index(formatted, im.shape)
+        else:
+            return [tuple(row) for row in matches]
+    else: raise ValueError("flood fill volume must be 3d!")
+
+cdef inline _row_match(long[:,:] rows, long[:] query, long limit):
+    cdef int rr, jj, match
+    for rr in range(limit):
+        match = 1
+        for jj in range(rows.shape[1]):
+            if query[jj] != rows[rr,jj]:
+                match = 0
+                break
+        if match == 1: return rr
+    return -1
+
+cdef inline _list_match(long[:] vals, long query):
+    cdef int jj
+    for jj in range(vals.shape[0]):
+        if vals[jj] == query: return jj
+    return -1
+
+cdef _flood_fill_3d(long[:,:,:] im, long[:] start, long[:] acceptable):
+    cdef int frontier_size = 1
+    cdef int matches_size = 1
+    cdef int starting_size = 400
+    cdef int ndim = im.ndim
+    cdef int in_matches, in_acceptable, base_point_ii, p_ii, new_frontier_size, jj
+    cdef np.ndarray[np.int_t, ndim=2] adjacent
+    cdef np.ndarray[np.int_t, ndim=2] matches =      np.zeros([starting_size, ndim], dtype=np.int)
+    cdef np.ndarray[np.int_t, ndim=2] frontier =     np.empty([starting_size, ndim], dtype=np.int)
+    cdef np.ndarray[np.int_t, ndim=2] new_frontier = np.empty([starting_size, ndim], dtype=np.int)
+    cdef np.ndarray[np.int_t, ndim=1] base_point, p, shape
+
+    shape = np.empty(ndim, dtype=np.int)
+    for ii in range(ndim): 
+        shape[ii] = im.shape[ii]
+        frontier[0,ii] = start[ii]
+        matches[0,ii] = start[ii]
+
+    while frontier_size > 0:
+        new_frontier_size = 0
+        for base_point_ii in range(frontier_size):
+            base_point = frontier[base_point_ii,:]
+            adjacent = _adjacent_points(base_point, shape)
+            for p_ii in range(adjacent.shape[0]):
+                p = adjacent[p_ii]
+                if _row_match(matches, p, matches_size) > -1: continue
+                if _list_match(acceptable, im[p[0],p[1],p[2]]) == -1: continue
+                new_frontier[new_frontier_size] = p
+                matches[matches_size] = p
+                matches_size += 1
+                new_frontier_size += 1
+                if matches_size >= matches.shape[0]:
+                    matches = _expand_2darray(matches)
+                if new_frontier_size >= new_frontier.shape[0]:
+                    new_frontier = _expand_2darray(new_frontier)
+                    frontier = _expand_2darray(frontier)
+        for p_ii in range(new_frontier_size):
+            for jj in range(new_frontier.shape[1]):
+                frontier[p_ii,jj] = new_frontier[p_ii, jj]
+        frontier_size = new_frontier_size
+    return matches[0:matches_size, :]
+    
+cdef np.ndarray[np.int_t, ndim=2] _expand_2darray(long[:,:] a):
+    cdef int ii,jj
+    cdef np.ndarray[np.int_t, ndim=2] expanded = np.zeros([a.shape[0] * 2, a.shape[1]], dtype=np.int)
+    for ii in range(a.shape[0]):
+        for jj in range(a.shape[1]):
+            expanded[ii,jj] = a[ii,jj]
+    return expanded
+
+cdef np.ndarray[np.int_t, ndim=2] _adjacent_points(long[:] point, long[:] shape):
+    cdef int dimensions = point.shape[0]
+    cdef int variants = dimensions * 2
+    cdef int v = -1
+    cdef int d, s, new,ii
+    cdef np.ndarray[np.int_t, ndim=2] adjacent = np.empty([variants, dimensions], dtype=np.int)
+    cdef int[2] shifts
+    shifts[0] = -1
+    shifts[1] = 1
+    for d in range(dimensions):
+        for s in shifts:
+            v += 1
+            for ii in range(dimensions):
+                adjacent[v,ii] = point[ii]
+            new = point[d] + s
+            if new < 0 or new >= shape[d]: continue
+            adjacent[v, d] = new
+    return adjacent
+
 
 class Rag(Graph):
     """Region adjacency graph for segmentation of nD volumes."""
@@ -403,6 +504,14 @@ class Rag(Graph):
         g.probabilities_r = g.probabilities.reshape(pr_shape)
         return g
 
+    def extent(self, nodeid):
+        extent_array = _flood_fill_3d(self.watershed, 
+                np.array(self.node[nodeid]['entrypoint']), 
+                np.array(self.node[nodeid]['watershed_ids']))
+        raveled_indices = np.ravel_multi_index((extent_array[:,0], 
+            extent_array[:,1], extent_array[:,2]), self.watershed.shape)
+        return set(raveled_indices)
+
 
     def copy(self):
         """Return a copy of the object and attributes.
@@ -492,10 +601,15 @@ class Rag(Graph):
                 edges = zip(repeat(nodeid), adj_labels)
             if not self.has_node(nodeid):
                 self.add_node(nodeid, extent=set())
-            try:
-                self.node[nodeid]['extent'].add(idx)
-            except KeyError:
-                self.node[nodeid]['extent'] = set([idx])
+            if 'entrypoint' not in self.node[nodeid]:
+                entrypoint_tuple = np.unravel_index(idx, self.watershed.shape)
+                self.node[nodeid]['entrypoint'] = np.array(entrypoint_tuple)
+            if 'watershed_ids' not in self.node[nodeid]:
+                self.node[nodeid]['watershed_ids'] = [nodeid]
+            try: self.node[nodeid]['extent'].add(idx)
+            except KeyError: self.node[nodeid]['extent'] = set([idx])
+            try: self.node[nodeid]['size'] += 1
+            except KeyError: self.node[nodeid]['size'] = 1
 
             if edges is not None:
                 for l1,l2 in edges:
@@ -552,10 +666,16 @@ class Rag(Graph):
                 edges = zip(repeat(nodeid), adj_labels)
                 if not self.has_node(nodeid):
                     self.add_node(nodeid, extent=set())
-                try:
-                    self.node[nodeid]['extent'].add(idx)
-                except KeyError:
-                    self.node[nodeid]['extent'] = set([idx])
+                if 'entrypoint' not in self.node[nodeid]:
+                    entrypoint_tuple = np.unravel_index(idx, self.watershed.shape)
+                    self.node[nodeid]['entrypoint'] = np.array(entrypoint_tuple)
+                if 'watershed_ids' not in self.node[nodeid]:
+                    self.node[nodeid]['watershed_ids'] = [nodeid]
+                try: self.node[nodeid]['extent'].add(idx)
+                except KeyError: self.node[nodeid]['extent'] = set([idx])
+                try: self.node[nodeid]['size'] += 1
+                except KeyError: self.node[nodeid]['size'] = 1
+
             else:
                 if len(adj_labels) == 0: continue
                 if adj_labels[-1] != self.boundary_body:
@@ -1495,6 +1615,15 @@ class Rag(Graph):
         self.update_ucm(n1, n2)
         w = self[n1][n2].get('weight', merge_priority)
         self.node[n1]['extent'].update(self.node[n2]['extent'])
+        self.node[n1]['size'] += self.node[n2]['size']
+        self.node[n1]['watershed_ids'] += self.node[n2]['watershed_ids']
+
+        flooded = self.extent(n1)
+        if self.node[n1]['extent'] == flooded:
+            sys.stderr.write("!")
+        else:
+            sys.stderr.write("flood-fill-fail: expected %d, got %d\n" % (len(self.node[n1]['extent']), len(flooded)))
+
         self.feature_manager.update_node_cache(self, n1, n2,
                 self.node[n1]['feature-cache'], self.node[n2]['feature-cache'])
         new_neighbors = [n for n in self.neighbors(n2)

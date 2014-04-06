@@ -44,6 +44,6 @@ if __name__ == '__main__':
                  "bin/gala-train", "bin/gala-test-package",
                  "bin/gala-pixel", "bin/comparestacks",
                  "bin/gala-valprob", "bin/gala-auto"],
-        ext_modules = cythonize("gala/features/*.pyx", annotate=True)
+        ext_modules = cythonize(["gala/*.pyx","gala/features/*.pyx"], annotate=True)
     )
 
