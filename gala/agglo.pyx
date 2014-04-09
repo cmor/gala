@@ -5,6 +5,7 @@ import argparse
 import random
 import logging
 import json
+import sys
 from copy import deepcopy
 from math import isnan
 # libraries
@@ -1664,7 +1665,6 @@ class Rag(Graph):
                (boundary_neighbor_pixels == n1) +
                (boundary_neighbor_pixels == n2)).all(axis=1)
         check = True - add
-        self.node[n1]['extent'].update(boundary[add])
         self.feature_manager.pixelwise_update_node_cache(self, n1,
                         self.node[n1]['feature-cache'], boundary[add])
         boundaries_to_edit = {}
