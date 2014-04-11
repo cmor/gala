@@ -5,14 +5,15 @@ cdef extern from "math.h":
     double sqrt(double x)
 
 NULL_VALUE = -1
-BASE_FEATURE_VECTOR_LEN = 9
+BASE_FEATURE_VECTOR_LEN = 3
 
 class Manager(base.Null):
-    def __init__(self, z_resolution_factor, neighbors_considered=1, *args, **kwargs):
+    def __init__(self, z_resolution_factor, neighbors_considered=1, merge_distance=50, *args, **kwargs):
         super(Manager, self).__init__()
         self.z_resolution_factor = z_resolution_factor
         self.neighbors_considered = neighbors_considered
-        print "--- considering %d neighbors" % (neighbors_considered)
+        self.merge_distance = merge_distance
+        self.merge_distance_sq = merge_distance * merge_distance
         self.unit_null_feature_vector = np.ones(BASE_FEATURE_VECTOR_LEN) * NULL_VALUE
         self.null_feature_vector = np.ones(BASE_FEATURE_VECTOR_LEN*neighbors_considered) * NULL_VALUE
 
@@ -34,6 +35,7 @@ class Manager(base.Null):
     def create_node_cache(self, g, n):
         points = self.points_from_idxs(list(g.extent(n)), 
                                             g.probabilities.shape)
+        # last axis is the size of the centroid
         return compute_flat_centroids(points, 0)
 
     def points_from_idxs(self, idxs, cube_shape):
@@ -50,7 +52,7 @@ class Manager(base.Null):
         if n2_centroids_l is None: n2_centroids_l = g.node[n2][self.default_cache]
         if len(n1_centroids_l) < 2 or len(n2_centroids_l) < 2:
             return self.null_feature_vector
-        n1_centroids, n2_centroids = np.vstack(n1_centroids_l), np.vstack(n2_centroids_l)
+        n1_centroids, n2_centroids = n1_centroids_l[:,:-1], n2_centroids_l[:,:-1]
         n1_closest_centroid, n2_closest_centroid = _closest_pair(n1_centroids,n2_centroids)
         if (n1_closest_centroid==NULL_VALUE).all() or (
             n2_closest_centroid==NULL_VALUE).all():
@@ -73,8 +75,14 @@ class Manager(base.Null):
         return feature_vector
 
     def update_node_cache(self, g, n1, n2, dst, src):
-        dst += src
-
+        #print "consolidating dst:",dst
+        #print "         with src:",src
+        all_centroids = np.vstack([dst,src])
+        consolidated = _consolidate_skeleton(all_centroids,self.merge_distance_sq)
+        if consolidated.shape != dst.shape: dst.resize(consolidated.shape, refcheck=False)
+        dst[:] = consolidated
+        #print dst
+ 
 
 def compute_flat_centroids(points, dim):
     zs = []
@@ -94,7 +102,8 @@ def compute_flat_centroids(points, dim):
         if rr+1 < count: 
             raise IndexError("Did not compute centroid correctly for pp=%d on %s" % (
                     pp, str(points)))
-        centroids.append(relevant_points.mean(axis=0))
+        centroids.append(np.append(relevant_points.mean(axis=0), count))
+    centroids = np.vstack(centroids)
     if len(zs) > 1:
         print "zs:",zs
         print "centroids:",centroids
@@ -110,15 +119,39 @@ def compute_feature_vector(p1, p2, s1, s2):
     feature_vector[0] = np.dot(p1_to_p2, p1_to_s1)
     feature_vector[1] = np.dot(p1_to_p2, p2_to_s2)
     feature_vector[2] = feature_vector[0] - feature_vector[1]
-    # coplanarity checks
-    feature_vector[3] = (p1[0] == p2[0])
-    feature_vector[4] = (p1[0] == s1[0])
-    feature_vector[5] = (p1[0] == s2[0])
-    feature_vector[6] = (p2[0] == s1[0])
-    feature_vector[7] = (p2[0] == s2[0])
-    feature_vector[8] = (s1[0] == s2[0])
-    #print "p1:",p1,"p2:",p2,"s1:",s1,"s2:",s2
+    print "p1:",p1,"p2:",p2,"s1:",s1,"s2:",s2
+    print "fvec:",feature_vector
     return feature_vector
+
+cdef _consolidate_skeleton(double[:,:] centroids, double max_distance_sq):
+    cdef np.ndarray[np.double_t, ndim=1] sizes = np.zeros(centroids.shape[0],)
+    cdef int pp,qq,ii
+    for pp in range(centroids.shape[0]): sizes[pp] = centroids[pp, centroids.shape[1]-1]
+    for pp in range(centroids.shape[0]):
+        if sizes[pp] == NULL_VALUE: continue
+        for qq in range(pp+1, centroids.shape[0]):
+            if sizes[qq] == NULL_VALUE: continue
+            if _euclidean_distance_sq(centroids[pp,0], centroids[pp,1], centroids[pp,2], 
+                centroids[qq,0], centroids[qq,1], centroids[qq,2]) > max_distance_sq: continue
+            for ii in range(centroids.shape[1]):
+                centroids[qq, ii] = ((centroids[pp,ii]*sizes[pp]) + (centroids[qq,ii]*sizes[qq])) \
+                                    / (sizes[pp] + sizes[qq])
+            sizes[qq] = sizes[qq] + sizes[pp]
+            sizes[pp] = NULL_VALUE
+            break
+    cdef int valid_count = 0
+    for pp in range(centroids.shape[0]):
+        if sizes[pp] != NULL_VALUE: valid_count += 1
+    cdef np.ndarray[np.double_t, ndim=2] consolidated = np.zeros([valid_count,centroids.shape[1]], dtype=np.double)
+    valid_count = 0
+    for pp in range(centroids.shape[0]):
+        if sizes[pp] == NULL_VALUE: continue
+        for ii in range(centroids.shape[1]):
+            consolidated[valid_count, ii] = centroids[pp,ii]
+        consolidated[valid_count, centroids.shape[1]-1] = sizes[pp]
+        valid_count += 1
+    return consolidated 
+    
 
 cdef _closest_pair(double[:,:] set1, double[:,:] set2):
     cdef double distance
