@@ -256,11 +256,11 @@ if __name__ == '__main__':
             exclusions=synapse_volume)
     MasterLogger.info("Finished building RAG")
     if args.remove_inclusions:
-        MasterLogger.info("Removing inclusions with %i nodes" % 
-                                                g.number_of_nodes())
-        g.remove_inclusions()
-        MasterLogger.info("Finished removing inclusions with %i nodes" %
-                                                g.number_of_nodes())
+        #MasterLogger.info("Removing inclusions with %i nodes" % 
+        #                                        g.number_of_nodes())
+        #g.remove_inclusions()
+        #MasterLogger.info("Finished removing inclusions with %i nodes" %
+        #                                        g.number_of_nodes())
         ws = g.get_segmentation()
     sps = imio.raveler_serial_section_map(ws, 0, False, False)
     args.thresholds = sum([x.split() for x in args.thresholds], [])
@@ -270,10 +270,10 @@ if __name__ == '__main__':
         g.agglomerate(t)
         MasterLogger.info("Finished agglomerating RAG to %f with %i nodes" %
                                                 (t, g.number_of_nodes()))
-        MasterLogger.info("Removing inclusions")
-        g.remove_inclusions()
-        MasterLogger.info("Finished removing inclusions with %i nodes" % 
-                                                g.number_of_nodes())
+        #MasterLogger.info("Removing inclusions")
+        #g.remove_inclusions()
+        #MasterLogger.info("Finished removing inclusions with %i nodes" % 
+        #                                        g.number_of_nodes())
         s = g.get_segmentation()
         if args.no_mito_merge is not None or args.mito_merge is not None:
             if args.classifier is not None:

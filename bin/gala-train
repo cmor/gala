@@ -143,11 +143,11 @@ def main(args):
     g = agglo.Rag(ws, p, feature_manager=fm, show_progress=args.show_progress,
             nozeros=args.nozeros, exclusions=synapse_volume, isfrozennode=is_mito,
             isfrozenedge=is_mito_boundary)
-    MasterLogger.info("Starting inclusion removal with %i nodes"
-                                                        % g.number_of_nodes())
-    g.remove_inclusions()
-    MasterLogger.info("Finished inclusion removal with %i nodes"
-                                                        % g.number_of_nodes())
+    #MasterLogger.info("Starting inclusion removal with %i nodes"
+    #                                                    % g.number_of_nodes())
+    #g.remove_inclusions()
+    #MasterLogger.info("Finished inclusion removal with %i nodes"
+    #                                                    % g.number_of_nodes())
     MasterLogger.info("Learning epochs")
     if args.active_vi:
         active_function = functools.partial(agglo.expected_change_vi,
