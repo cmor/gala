@@ -267,18 +267,69 @@ def random_priority(g, n1, n2):
         return inf
     return random.random()
 
-def flood_fill(im, start, acceptable, raveled = False):
-    if im[start] not in acceptable: return []
+cdef voxels_at_intersection_3d(long[:,:] edge_points, long[:,:,:] labeled, 
+                               long[:] acceptable1, long[:] acceptable2, long radius, 
+                               long z_resolution_factor):
+    cdef int ndim = labeled.ndim # has to be 3
+    cdef int pp
+    cdef np.ndarray[np.int_t, ndim=2] limits = np.empty((ndim,2), dtype=np.integer)
+    cdef np.ndarray[np.int_t, ndim=1] epicenter = np.empty(ndim, dtype=np.integer)
+    cdef int total_0 = 0
+    cdef int total_1 = 0
+    cdef int total_2 = 0
+    for pp in range(edge_points.shape[0]):
+        total_0 += edge_points[pp,0]
+        total_1 += edge_points[pp,1]
+        total_2 += edge_points[pp,2]
+    epicenter[0] = total_0 / edge_points.shape[0]
+    epicenter[1] = total_1 / edge_points.shape[0]
+    epicenter[2] = total_2 / edge_points.shape[0]
+
+    # doing this as a for loop is much prettier, but it forces Cython to
+    # do bounds checking if we index with a variable. instead we unroll
+    limits[0,0] = epicenter[0] - (radius/z_resolution_factor)
+    limits[0,1] = epicenter[0] + (radius/z_resolution_factor)
+    limits[1,0] = epicenter[1] - radius
+    limits[1,1] = epicenter[1] + radius
+    limits[2,0] = epicenter[2] - radius
+    limits[2,1] = epicenter[2] + radius
+    if limits[0,0] < 0: limits[0,0] = 0
+    if limits[1,0] < 0: limits[1,0] = 0
+    if limits[2,0] < 0: limits[2,0] = 0
+    if limits[0,1] >= labeled.shape[0]: limits[0,1] = labeled.shape[0]-1
+    if limits[1,1] >= labeled.shape[1]: limits[1,1] = labeled.shape[1]-1
+    if limits[2,1] >= labeled.shape[2]: limits[2,1] = labeled.shape[2]-1
+
+    return [_find_start_and_fill(edge_points, labeled, acceptable1, limits, epicenter),
+            _find_start_and_fill(edge_points, labeled, acceptable2, limits, epicenter)]
+
+cdef inline _find_start_and_fill(long[:,:] edge_points, long[:,:,:] labeled, 
+                    long[:] acceptable, long[:,:] limits, long[:] epicenter):
+    cdef int ii, pp
+    cdef int epicenter_works = 0
+    for ii in range(acceptable.shape[0]):
+        if acceptable[ii] == labeled[epicenter[0], epicenter[1], epicenter[2]]: 
+            epicenter_works = 1; break
+    if epicenter_works == 1:
+        return _flood_fill_3d(labeled,epicenter,acceptable,limits)
+    for pp in range(edge_points.shape[0]):
+        for ii in range(acceptable.shape[0]):
+            if labeled[edge_points[pp,0], edge_points[pp,1], edge_points[pp,2]] == acceptable[ii]:
+                return _flood_fill_3d(labeled,edge_points[pp],acceptable,limits)
+
+def flood_fill(im, start, acceptable,limits=None,raveled = False):
     cdef np.ndarray[np.int_t, ndim=2] matches
     if im.ndim == 3:
         a = np.array(acceptable)
         s = np.array(start)
-        matches = _flood_fill_3d(im, s, a)
+        if limits == None:
+            limits = np.array([[0,im.shape[0]-1],[0,im.shape[1]-1],[0,im.shape[2]-1]])
+        matches = _flood_fill_3d(im, s, a, limits)
         if raveled:
             formatted = matches.T
             return np.ravel_multi_index(formatted, im.shape)
         else:
-            return [tuple(row) for row in matches]
+            return matches
     else: raise ValueError("flood fill volume must be 3d!")
 
 cdef inline _row_match(long[:,:] rows, long[:] query, long limit):
@@ -298,31 +349,30 @@ cdef inline _list_match(long[:] vals, long query):
         if vals[jj] == query: return jj
     return -1
 
-cdef _flood_fill_3d(long[:,:,:] im, long[:] start, long[:] acceptable):
+cdef _flood_fill_3d(long[:,:,:] im, long[:] start, long[:] acceptable, long[:,:] limits):
     cdef int frontier_size = 1
     cdef int matches_size = 1
-    cdef int starting_size = 400
+    cdef int starting_size = 5000
     cdef int ndim = im.ndim
     cdef int in_matches, in_acceptable, base_point_ii, p_ii, new_frontier_size, jj
     cdef np.ndarray[np.int_t, ndim=2] adjacent
     cdef np.ndarray[np.int_t, ndim=2] matches =      np.zeros([starting_size, ndim], dtype=np.int)
     cdef np.ndarray[np.int_t, ndim=2] frontier =     np.empty([starting_size, ndim], dtype=np.int)
     cdef np.ndarray[np.int_t, ndim=2] new_frontier = np.empty([starting_size, ndim], dtype=np.int)
-    cdef np.ndarray[np.int_t, ndim=1] base_point, p, shape
+    cdef np.ndarray[np.int_t, ndim=1] base_point, p
 
-    shape = np.empty(ndim, dtype=np.int)
-    for ii in range(ndim): 
-        shape[ii] = im.shape[ii]
-        frontier[0,ii] = start[ii]
-        matches[0,ii] = start[ii]
-
+    for jj in range(ndim):
+        frontier[0,jj] = start[jj]
+        matches[0,jj] = start[jj]
     while frontier_size > 0:
         new_frontier_size = 0
         for base_point_ii in range(frontier_size):
-            base_point = frontier[base_point_ii,:]
-            adjacent = _adjacent_points(base_point, shape)
+            base_point = frontier[base_point_ii]
+            adjacent = _adjacent_points(base_point, limits)
             for p_ii in range(adjacent.shape[0]):
                 p = adjacent[p_ii]
+                for jj in range(p.shape[0]):
+                    if p[jj] == -1: continue
                 if _row_match(matches, p, matches_size) > -1: continue
                 if _list_match(acceptable, im[p[0],p[1],p[2]]) == -1: continue
                 new_frontier[new_frontier_size] = p
@@ -348,22 +398,24 @@ cdef np.ndarray[np.int_t, ndim=2] _expand_2darray(long[:,:] a):
             expanded[ii,jj] = a[ii,jj]
     return expanded
 
-cdef np.ndarray[np.int_t, ndim=2] _adjacent_points(long[:] point, long[:] shape):
+cdef np.ndarray[np.int_t, ndim=2] _adjacent_points(long[:] point, long[:,:] limits):
+    """ limits is 2d array, axis 0 is each dimension, 0 axis 1 is lower bound, 
+    1 axis 1 is upper bound """
     cdef int dimensions = point.shape[0]
     cdef int variants = dimensions * 2
     cdef int v = -1
     cdef int d, s, new,ii
-    cdef np.ndarray[np.int_t, ndim=2] adjacent = np.empty([variants, dimensions], dtype=np.int)
     cdef int[2] shifts
+    cdef np.ndarray[np.int_t, ndim=2] adjacent = np.ones([variants, dimensions], dtype=np.int)*-1
     shifts[0] = -1
     shifts[1] = 1
     for d in range(dimensions):
         for s in shifts:
             v += 1
+            new = point[d] + s
+            if new < limits[d,0] or new > limits[d,1]: continue
             for ii in range(dimensions):
                 adjacent[v,ii] = point[ii]
-            new = point[d] + s
-            if new < 0 or new >= shape[d]: continue
             adjacent[v, d] = new
     return adjacent
 
@@ -375,6 +427,7 @@ class Rag(Graph):
             merge_priority_function=boundary_mean,
             allow_shared_boundaries=True, gt_vol=None,
             feature_manager=features.base.Null(),
+            z_resolution_factor=1,
             show_progress=False, lowmem=False, connectivity=1,
             channel_is_oriented=None, orientation_map=array([]),
             normalize_probabilities=False, nozeros=False, exclusions=array([]),
@@ -460,6 +513,7 @@ class Rag(Graph):
         super(Rag, self).__init__(weighted=False)
         self.show_progress = show_progress
         self.nozeros = nozeros
+        self.z_resolution_factor = z_resolution_factor
         self.connectivity = connectivity
         self.pbar = (ip.StandardProgressBar() if self.show_progress
                      else ip.NoProgressBar())
@@ -509,7 +563,7 @@ class Rag(Graph):
 
     def extent(self, nodeid):
         if 'extent' in self.node[nodeid]: return self.node[nodeid]['extent']
-        extent_array = _flood_fill_3d(self.watershed, 
+        extent_array = flood_fill(self.watershed, 
                 np.array(self.node[nodeid]['entrypoint']), 
                 np.array(self.node[nodeid]['watershed_ids']))
         if len(extent_array) != self.node[nodeid]['size']:
@@ -519,6 +573,44 @@ class Rag(Graph):
             extent_array[:,1], extent_array[:,2]), self.watershed.shape)
         return set(raveled_indices)
 
+
+    def voxels_at_intersection(self, n1, n2, radius, as_coords=True):
+        edge_points = np.vstack(np.unravel_index(list(self[n1][n2]['boundary']),
+                                self.watershed.shape)).T
+        if self.watershed.ndim == 3 and as_coords:
+            try:
+                return voxels_at_intersection_3d(edge_points, self.watershed,
+                         np.array(self.node[n1]['watershed_ids']),
+                         np.array(self.node[n2]['watershed_ids']),
+                         radius, self.z_resolution_factor)
+            except:
+                print "Fucking bullshit",self.node[n1]['watershed_ids'],self.node[n2]['watershed_ids'],edge_points
+ 
+        edge_mean_np = np.mean(edge_points, axis=0).astype(np.integer)
+        edge_mean_tup = tuple(edge_mean_np)
+        limits = np.zeros((self.watershed.ndim,2), dtype=np.integer)
+        for d in range(self.watershed.ndim):
+            if d == 0: max_dist = radius/self.z_resolution_factor
+            else: max_dist = radius
+            limits[d,0] = edge_mean_np[d] - max_dist
+            limits[d,1] = edge_mean_np[d] + max_dist
+            if limits[d,0] < 0: limits[d,0] = 0
+            if limits[d,1] >= self.watershed.shape[d]:
+                limits[d,1] = self.watershed.shape[d]-1
+        output = []
+        for n in [n1,n2]:
+            acceptable = np.array(self.node[n]['watershed_ids'], dtype=np.integer)
+            start = None
+            if self.watershed[edge_mean_tup] in acceptable:
+                start = edge_mean_np
+            else:
+                for point in edge_points:
+                    if self.watershed[tuple(point)] in acceptable:
+                        start = point
+                        break
+            flooded = flood_fill(self.watershed,start,acceptable,limits,raveled=(not as_coords))
+            output.append(flooded)
+        return output
 
     def copy(self):
         """Return a copy of the object and attributes.
@@ -728,10 +820,12 @@ class Rag(Graph):
         """
         for n in ip.with_progress(
                     self.nodes(), title='Node caches ', pbar=self.pbar):
+            if n == self.boundary_body: continue
             self.node[n]['feature-cache'] = \
                             self.feature_manager.create_node_cache(self, n)
         for n1, n2 in ip.with_progress(
                     self.edges(), title='Edge caches ', pbar=self.pbar):
+            if n1 == self.boundary_body or n2 == self.boundary_body: continue
             self[n1][n2]['feature-cache'] = \
                             self.feature_manager.create_edge_cache(self, n1, n2)
 

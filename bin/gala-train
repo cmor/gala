@@ -141,6 +141,7 @@ def main(args):
 
     MasterLogger.info("Building RAG")
     g = agglo.Rag(ws, p, feature_manager=fm, show_progress=args.show_progress,
+            z_resolution_factor=args.z_resolution_factor,
             nozeros=args.nozeros, exclusions=synapse_volume, isfrozennode=is_mito,
             isfrozenedge=is_mito_boundary)
     #MasterLogger.info("Starting inclusion removal with %i nodes"
@@ -298,7 +299,10 @@ if __name__ == '__main__':
         help='Connected component threshold in seed creation')
     parser.add_argument('--no-mito-merge', type=float, nargs='+', default=None,
         help='Mitochodria channels, Mitochondria threshold, Boundary Threshold \
-        for training without merging the mitochondrial superpixels.')    
+        for training without merging the mitochondrial superpixels.')
+    parser.add_argument('-z', '--z-resolution-factor', type=int, default=1,
+        help='For anisotropic data, the factor by which the z resolution is lower \
+        than x and y (eg for 6nm x 6nm x 30nm res, should be 5')
     args = parser.parse_args()
     if args.profile:
         import cProfile

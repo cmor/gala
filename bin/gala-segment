@@ -115,7 +115,11 @@ if __name__ == '__main__':
         for segmenting without merging the mitochondrial superpixels.')
     parser.add_argument('--mito-merge', type=float, nargs='+', default=None,
         help='Mitochodria channels, Mitochondria threshold, Boundary Threshold \
-        for merging only the mitochondrial superpixels with the surrounding cytoplasms.')          
+        for merging only the mitochondrial superpixels with the surrounding cytoplasms.')
+    parser.add_argument('-z', '--z-resolution-factor', type=int, default=1,
+        help='For anisotropic data, the factor by which the z resolution is lower \
+        than x and y (eg for 6nm x 6nm x 30nm res, should be 5')
+          
     args = parser.parse_args()
     
 
@@ -247,11 +251,13 @@ if __name__ == '__main__':
     if args.use_neuroproof:
         g = stack_np.Stack(ws, p, single_channel=args.single_channel, classifier=cl)        
     elif args.no_mito_merge is not None or args.mito_merge is not None:       
-        g = agglo.Rag(ws, p, mpf, feature_manager=fm, 
+        g = agglo.Rag(ws, p, mpf, feature_manager=fm,
+            z_resolution_factor=args.z_resolution_factor,
             show_progress=args.show_progress, nozeros=args.nozeros, 
             exclusions=synapse_volume, isfrozennode=is_mito, isfrozenedge=is_mito_boundary)
     else:
         g = agglo.Rag(ws, p, mpf, feature_manager=fm, 
+            z_resolution_factor=args.z_resolution_factor,
             show_progress=args.show_progress, nozeros=args.nozeros, 
             exclusions=synapse_volume)
     MasterLogger.info("Finished building RAG")
