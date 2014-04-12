@@ -14,6 +14,7 @@ from . import \
     histogram, \
     inclusion, \
     io, \
+    localmoments, \
     moments, \
     orientation, \
     skeleton, \
@@ -21,4 +22,4 @@ from . import \
     stage
 
 __all__ = ['base', 'contact', 'direction', 'convex_hull', 'graph', 'histogram', 'inclusion', 'io',
-    'moments', 'orientation', 'squiggliness', 'skeleton', "stage"]
+    'localmoments','moments', 'orientation', 'squiggliness', 'skeleton', 'stage']
