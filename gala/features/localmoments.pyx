@@ -40,7 +40,6 @@ class Manager(base.Null):
         json_fm['moments'] = {
             'radii' : self.radii,
             'nmoments' : self.nmoments,
-            'oriented' : self.oriented,
             'normalize' : self.normalize
         }
         return json_fm
