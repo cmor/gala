@@ -267,6 +267,37 @@ def random_priority(g, n1, n2):
         return inf
     return random.random()
 
+def despeckle_watershed(ws, in_place=True):
+    cdef int ii
+    if not in_place: ws = ws.copy()
+    if ws.ndim == 3:
+        for ii in range(ws.shape[0]):
+            ws[ii,:,:] = _despeckle_2d_watershed(ws[ii,:,:])
+        return ws
+    else:
+        return _despeckle_2d_watershed(ws)
+
+cdef _despeckle_2d_watershed(long[:,:] ws):
+    cdef int ii, jj, i_offset, j_offseti, label
+    neighborhoods = {}
+    replacements = {}
+    for ii in range(ws.shape[0]):
+        for jj in range(ws.shape[1]):
+            if ws[ii,jj] not in neighborhoods: neighborhoods[ws[ii,jj]] = []
+            for i_offset in range(-1,1):
+                for j_offset in range(-1,1):
+                    label = ws[ii+i_offset, jj+j_offset]
+                    if label == ws[ii,jj]: continue
+                    if label in neighborhoods[ws[ii,jj]]: continue
+                    neighborhoods[ws[ii,jj]].append(label)
+    for label, neighbors in neighborhoods.iteritems():
+        if len(neighbors) == 1: replacements[label] = neighbors[0]
+        else: replacements[label] = label
+    for ii in range(ws.shape[0]):
+        for jj in range(ws.shape[1]):
+            ws[ii,jj] = replacements[ws[ii,jj]]
+    return ws
+
 cdef voxels_at_intersection_3d(long[:,:] edge_points, long[:,:,:] labeled, 
                                long[:] acceptable1, long[:] acceptable2, long radius, 
                                long z_resolution_factor):
