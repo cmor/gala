@@ -213,16 +213,16 @@ def watershed(a, seeds=None, connectivity=1, mask=None, smooth_thresh=0.0,
     # However, we operate on a copy of it called `b`, so that `a` can be used
     # to break ties.
     b = a
+    if smooth_thresh > 0.0:
+        b = hminima(a, smooth_thresh)
     if not seeded:
-        seeds = regional_minima(a, connectivity)
+        seeds = regional_minima(b, connectivity)
     if minimum_seed_size > 0:
         seeds = remove_small_connected_components(seeds, minimum_seed_size,
                                                   in_place=True)
         seeds = relabel_from_one(seeds)[0]
     if smooth_seeds:
         seeds = binary_opening(seeds, sel)
-    if smooth_thresh > 0.0:
-        b = hminima(a, smooth_thresh)
     if seeds.dtype == bool:
         seeds = label(seeds, sel)[0]
     if skimage_available and not override_skimage and not dams:
