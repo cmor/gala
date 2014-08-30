@@ -1,6 +1,7 @@
 #from distutils.core import setup
 from setuptools import setup
 from Cython.Build import cythonize
+import numpy
 
 descr = """Graph-based active learning of agglomeration
 
@@ -39,6 +40,7 @@ if __name__ == '__main__':
         package_data={'gala':
                       ['testdata/*.*', 'testdata/original_grayscales/*']},
         install_requires=INST_DEPENDENCIES,
+        include_dirs=[numpy.get_include()],
         scripts=["bin/gala-segmentation-stitch",
                  "bin/gala-segmentation-pipeline",
                  "bin/gala-train", "bin/gala-test-package",
