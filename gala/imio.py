@@ -10,7 +10,10 @@ import tempfile as tmp
 
 # libraries
 import h5py
-from PIL import Image
+try:
+    import Image
+except:
+    from PIL import Image
 try:
     from pylibtiff import TIFF
 except:
