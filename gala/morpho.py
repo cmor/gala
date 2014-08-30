@@ -253,8 +253,10 @@ def watershed(a, seeds=None, connectivity=1, mask=None, smooth_thresh=0.0,
     # However, we operate on a copy of it called `b`, so that `a` can be used
     # to break ties.
     b = a
+    if smooth_thresh > 0.0:
+        b = hminima(a, smooth_thresh)
     if not seeded:
-        seeds = regional_minima(a, connectivity)
+        seeds = regional_minima(b, connectivity)
         seeds = label(seeds, sel)[0]
     if minimum_seed_size > 0:
         seeds = remove_small_connected_components(seeds, minimum_seed_size,
@@ -262,8 +264,6 @@ def watershed(a, seeds=None, connectivity=1, mask=None, smooth_thresh=0.0,
         seeds = relabel_from_one(seeds)[0]
     if smooth_seeds:
         seeds = binary_opening(seeds, sel)
-    if smooth_thresh > 0.0:
-        b = hminima(a, smooth_thresh)
     if (seeds.dtype == bool) or len(np.unique(seeds)) == 2:
         seeds = label(seeds, sel)[0]
     if skimage_available and not override_skimage and not dams:
@@ -537,15 +537,18 @@ def build_levels_dict(a):
         d[val].append(loc)
     return d
 
-def build_neighbors_array(ar, connectivity=1):
+def build_neighbors_array(ar, connectivity=1, link_distance=[]):
     idxs = arange(ar.size, dtype=uint32)
-    return get_neighbor_idxs(ar, idxs, connectivity)
+    return get_neighbor_idxs(ar, idxs, connectivity, link_distance)
 
-def get_neighbor_idxs(ar, idxs, connectivity=1):
+def get_neighbor_idxs(ar, idxs, connectivity=1, link_distance=[]):
     if isscalar(idxs): # in case only a single idx is given
         idxs = [idxs]
     idxs = array(idxs) # in case a list or other array-like is given
     strides = array(ar.strides)/ar.itemsize
+    for axis, distance in enumerate(link_distance):
+        for d in range(2, distance+1):
+            strides = np.concatenate((strides, strides[axis:axis+1]*d))
     if connectivity == 1: 
         steps = (strides, -strides)
     else:
@@ -554,7 +557,25 @@ def get_neighbor_idxs(ar, idxs, connectivity=1):
             prod = array(list(it.product(*([[1,-1]]*i))))
             i_strides = array(list(it.combinations(strides,i))).T
             steps.append(prod.dot(i_strides).ravel())
-    return idxs[:,newaxis] + concatenate(steps)
+
+    if len(link_distance)==0:
+        return idxs[:,newaxis] + concatenate(steps)
+
+    full_steps = np.tile(concatenate(steps), (idxs.shape[0], 1))
+    neighbors = np.tile(idxs, (full_steps.shape[1],1)).T + full_steps
+
+    # Don't link outside the volume - bring all outside links back to the boundary
+    # This allows links to self (at the boundary) or multiple links to the same pixel.
+    below = neighbors < 0
+    while np.any(below):
+        neighbors[below] -= full_steps[below]
+        below = neighbors < 0
+    above = neighbors >= ar.size
+    while np.any(above):
+        neighbors[above] -= full_steps[above]
+        above = neighbors >= ar.size
+
+    return neighbors
 
 def orphans(a):
     """Find all the segments that do not touch the volume boundary.

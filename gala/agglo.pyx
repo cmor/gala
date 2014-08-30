@@ -278,7 +278,7 @@ def despeckle_watershed(ws, in_place=True):
         return _despeckle_2d_watershed(ws)
 
 cdef _despeckle_2d_watershed(long[:,:] ws):
-    cdef int ii, jj, i_offset, j_offseti, label
+    cdef int ii, jj, i_offset, j_offset, label
     neighborhoods = {}
     replacements = {}
     for ii in range(ws.shape[0]):
@@ -462,7 +462,7 @@ class Rag(Graph):
             show_progress=False, lowmem=False, connectivity=1,
             channel_is_oriented=None, orientation_map=array([]),
             normalize_probabilities=False, nozeros=False, exclusions=array([]),
-            isfrozennode=None, isfrozenedge=None):
+            isfrozennode=None, isfrozenedge=None, error_mask=array([]), link_distance=[]):
         """Create a graph from label and image/probability volumes.
 
         The label field can be complete (every pixel belongs to a
@@ -537,7 +537,7 @@ class Rag(Graph):
         Returns
         -------
         self : Rag object
-            A region adjacency graph (Rag) object, containing all
+            A region adjacency graph (Rag) object, containing all4
             necessary information to perform agglomerative
             segmentation.
         """
@@ -548,7 +548,12 @@ class Rag(Graph):
         self.connectivity = connectivity
         self.pbar = (ip.StandardProgressBar() if self.show_progress
                      else ip.NoProgressBar())
-        self.set_watershed(watershed, lowmem, connectivity)
+        self.link_distance = link_distance
+        if error_mask.size > 0:
+            print 'using error_mask'
+            self.set_watershed_mask(watershed, error_mask, connectivity, link_distance)
+        else:
+            self.set_watershed(watershed, lowmem, connectivity, link_distance)
         self.set_probabilities(probabilities, normalize_probabilities)
         self.set_orientations(orientation_map, channel_is_oriented)
         if watershed is None:
@@ -889,7 +894,7 @@ class Rag(Graph):
         return self.pixel_neighbors[idxs]
 
 
-    def get_neighbor_idxs_lean(self, idxs, connectivity=1):
+    def get_neighbor_idxs_lean(self, idxs, connectivity=1, link_distance=[]):
         """Compute neighbor indices from input indices.
 
         Parameters
@@ -908,7 +913,53 @@ class Rag(Graph):
             An array of linear indices to the neighbors of each input
             index.
         """
-        return morpho.get_neighbor_idxs(self.watershed, idxs, connectivity)
+        return morpho.get_neighbor_idxs(self.watershed, idxs, connectivity, link_distance)
+
+
+    def apply_extra_padding(self, volume, pad_value):
+        """Apply any extra padding required by self.link_distance
+
+        Parameters
+        ----------
+        volume : array
+            The input array.
+        pad_value : scalar
+            The value to pad with.
+
+        Returns
+        -------
+        volume: The padded volume.
+        """
+        if self.link_distance is None or len(self.link_distance) == 0:
+            return volume
+        for axis in range(len(self.link_distance)):
+            extra_padding = self.link_distance[axis] - 1
+            if extra_padding > 0:
+                volume = morpho.pad(volume, [pad_value] * extra_padding, axes=[axis])
+        return volume
+
+
+    def remove_extra_padding(self, volume):
+        """Remove any extra padding added due to self.link_distance
+
+        Parameters
+        ----------
+        volume : array
+            The input array.
+
+        Returns
+        -------
+        volume: The volume with padding removed.
+        """
+        if self.link_distance is None or len(self.link_distance) == 0:
+            return volume
+        for axis in range(len(self.link_distance)):
+            extra_padding = self.link_distance[axis] - 1
+            if extra_padding > 0:
+                volume = volume.swapaxes(0,axis)
+                volume = volume[extra_padding:-extra_padding]
+                volume = volume.swapaxes(0,axis)
+        return volume
 
 
     def set_probabilities(self, probs=array([]), normalize=False):
@@ -948,6 +999,7 @@ class Rag(Graph):
         padding = [inf]+(self.pad_thickness-1)*[0]
         if p_ndim == w_ndim:
             self.probabilities = morpho.pad(probs, padding)
+            self.probabilities = self.apply_extra_padding(self.probabilities, padding[0])
             self.probabilities_r = self.probabilities.ravel()[:,newaxis]
         elif p_ndim == w_ndim+1:
             if sp[1:] == sw:
@@ -955,6 +1007,7 @@ class Rag(Graph):
                 probs = probs.transpose(sp)
             axes = range(p_ndim-1)
             self.probabilities = morpho.pad(probs, padding, axes)
+            self.probabilities = self.apply_extra_padding(self.probabilities, padding[0])
             self.probabilities_r = self.probabilities.reshape(
                                                 (self.watershed.size, -1))
 
@@ -979,6 +1032,7 @@ class Rag(Graph):
             self.orientation_map_r = self.orientation_map.ravel()
         padding = [0]+(self.pad_thickness-1)*[0]
         self.orientation_map = morpho.pad(orientation_map, padding).astype(int)
+        self.orientation_map = self.apply_extra_padding(self.orientation_map, padding[0])
         self.orientation_map_r = self.orientation_map.ravel()
         if channel_is_oriented is None:
             nchannels = 1 if self.probabilities.ndim==self.watershed.ndim \
@@ -1001,7 +1055,7 @@ class Rag(Graph):
                 self.probabilities_r[:, ~self.channel_is_oriented]
 
 
-    def set_watershed(self, ws=array([]), lowmem=False, connectivity=1):
+    def set_watershed(self, ws=array([]), lowmem=False, connectivity=1, link_distance=[]):
         """Set the initial segmentation volume (watershed).
 
         The initial segmentation is called `watershed` for historical
@@ -1016,6 +1070,9 @@ class Rag(Graph):
             results in about 10% less memory usage and 10% more time.
         connectivity : int in {1, ..., `ws.ndim`}, optional
             The pixel neighborhood.
+        link_distance : list of int
+            Distances in each dimension over which linking is allowed
+            eg. [2,1,1] allows skip 1 in z and treats xy as normal
 
         Returns
         -------
@@ -1031,16 +1088,62 @@ class Rag(Graph):
             self.watershed = morpho.pad(ws, [0, self.boundary_body])
         else:
             self.watershed = morpho.pad(ws, self.boundary_body)
+        self.watershed = self.apply_extra_padding(self.watershed, self.boundary_body)
         self.watershed_r = self.watershed.ravel()
         self.pad_thickness = 2 if (self.watershed == 0).any() else 1
         if lowmem:
             def neighbor_idxs(x):
-                return self.get_neighbor_idxs_lean(x, connectivity)
+                return self.get_neighbor_idxs_lean(x, connectivity, link_distance)
             self.neighbor_idxs = neighbor_idxs
         else:
             self.pixel_neighbors = \
-                morpho.build_neighbors_array(self.watershed, connectivity)
+                morpho.build_neighbors_array(self.watershed, connectivity, link_distance)
             self.neighbor_idxs = self.get_neighbor_idxs_fast
+
+
+    def set_watershed_mask(self, ws=array([]), mask=array([]), connectivity=1, link_distance=[]):
+        """Set the initial segmentation volume (watershed) and mask volume.
+
+        Like set_watershed but blocks connections to masked pixels
+        Use link_distance to allow linking across masked regions
+
+        Parameters
+        ----------
+        ws : array of int
+            The initial segmentation.
+        mask : array of int or bool
+            Masked pixels (any pixels greater than 0)
+        connectivity : int in {1, ..., `ws.ndim`}, optional
+            The pixel neighborhood.
+        link_distance : list of int
+            Distances in each dimension over which linking is allowed
+            eg. [2,1,1] allows skip 1 in z and treats xy as normal
+
+        Returns
+        -------
+        None
+        """
+        try:
+            self.boundary_body = ws.max()+1
+        except ValueError: # empty watershed given
+            self.boundary_body = -1
+        self.volume_size = ws.size
+        self.has_zero_boundaries = (ws==0).any()
+        if self.has_zero_boundaries:
+            self.watershed = morpho.pad(ws, [0, self.boundary_body])
+            self.mask = morpho.pad(mask, [0, 0])
+        else:
+            self.watershed = morpho.pad(ws, self.boundary_body)
+            self.mask = morpho.pad(mask, 0)
+        self.watershed = self.apply_extra_padding(self.watershed, self.boundary_body)
+        self.mask = self.apply_extra_padding(self.mask, 0)
+        # Treat masked regions as boundary        
+        self.watershed[self.mask>0] = self.boundary_body
+        self.watershed_r = self.watershed.ravel()
+        self.pad_thickness = 2 if (self.watershed == 0).any() else 1
+        self.pixel_neighbors = \
+            morpho.build_neighbors_array(self.watershed, connectivity, link_distance)
+        self.neighbor_idxs = self.get_neighbor_idxs_fast
 
 
     def set_ground_truth(self, gt=None):
@@ -1064,6 +1167,7 @@ class Rag(Graph):
             seg_ignore = [0, self.boundary_body] if \
                         (self.watershed==0).any() else [self.boundary_body]
             self.gt = morpho.pad(gt, gt_ignore)
+            self.gt = self.apply_extra_padding(self.gt, gtm)
             self.rig = contingency_table(self.watershed, self.gt,
                                          ignore_seg=seg_ignore,
                                          ignore_gt=gt_ignore)
@@ -1099,6 +1203,7 @@ class Rag(Graph):
         """
         if excl.size != 0:
             excl = morpho.pad(excl, [0]*self.pad_thickness)
+            excl = self.apply_extra_padding(excl, 0)
         for n in self.nodes():
             if excl.size != 0:
                 eids = unique(excl.ravel()[list(self.extent(n))])
@@ -1187,9 +1292,9 @@ class Rag(Graph):
                                         self.merge_queue.peek()[0] < threshold:
             merge_priority, _, n1, n2 = self.merge_queue.pop()
             self.update_frozen_sets(n1, n2)
-            self.merge_nodes(n1, n2, merge_priority)
+            new_node_id = self.merge_nodes(n1, n2, merge_priority)
             if save_history:
-                history.append((n1,n2))
+                history.append((n1,n2,new_node_id))
                 scores.append(merge_priority)
                 evaluation.append(
                     (self.number_of_nodes()-1, self.split_vi())
@@ -1949,6 +2054,8 @@ class Rag(Graph):
         """
         m = self.tree.get_map()
         seg = m[self.watershed]
+        # Remove link_distance extra padding
+        seg = self.remove_extra_padding(seg)
         if self.pad_thickness > 1: # volume has zero-boundaries
             seg = morpho.remove_merged_boundaries(seg, self.connectivity)
         return morpho.juicy_center(seg, self.pad_thickness)
