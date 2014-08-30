@@ -9,7 +9,8 @@ import subprocess
 import tempfile as tmp
 
 # libraries
-import h5py, Image
+import h5py
+from PIL import Image
 try:
     from pylibtiff import TIFF
 except:
